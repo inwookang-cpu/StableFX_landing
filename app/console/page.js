@@ -1,7 +1,7 @@
 'use client';
 
 import '../globals.css';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { 
   DateRuleCalculator, 
   CALENDAR_MAP, 
@@ -3714,7 +3714,24 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
   const [proMode, setProMode] = useState(false); // Pro Mode 토글
   const [usdMmda, setUsdMmda] = useState(4.5); // USD MMDA 금리 (%)
   const [krwMmda, setKrwMmda] = useState(3.0); // KRW 고금리통장 금리 (%)
-  const [tradeForm, setTradeForm] = useState({ tradeDate: new Date().toISOString().split('T')[0], settlementDate: '', instrument: 'FX_SWAP', ccy1: 'USD', ccy1Amt: 1000000, ccy2: 'KRW', rate: '', counterParty: '', trader: '' });
+  const [tradeForm, setTradeForm] = useState({ 
+    instrument: 'FX_SWAP',      // 'FX_SWAP' | 'OUTRIGHT'
+    direction: 'B/S',           // FX Swap: 'B/S' | 'S/B', Outright: 'Buy' | 'Sell'
+    tradeDate: new Date().toISOString().split('T')[0],
+    nearDate: '',
+    farDate: '',
+    spotRate: 0,
+    swapPoint: 0,
+    farRate: 0,
+    ccy1: 'USD',
+    ccy2: 'KRW',
+    nearCcy1Amt: 0,
+    farCcy1Amt: 0,
+    nearCcy2Amt: 0,
+    farCcy2Amt: 0,
+    counterParty: '', 
+    trader: '' 
+  });
 
   useEffect(() => {
     fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => {
@@ -3839,17 +3856,36 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
     
     setLastQuery(queryData);
     
-    // tradeForm 업데이트 (거래 유형에 따라 instrument 설정)
+    // tradeForm 업데이트 (모든 필드 채우기)
     const instrument = tradeType === 'outright' ? 'OUTRIGHT' : 'FX_SWAP';
-    setTradeForm(prev => ({ 
-      ...prev, 
-      settlementDate: farDate,
-      nearDate: tradeType === 'swap' ? nearDate : null,
-      rate: appliedRate.toFixed(2), 
-      ccy1Amt: pricingNotional,
+    const swapPoint = direction === 'borrow_usd' || direction === 'sell' ? clientPts.bid : clientPts.ask;
+    const nearCcy2 = pricingNotional * spot;
+    const farCcy2 = pricingNotional * appliedRate;
+    
+    // Direction 변환: borrow_usd -> B/S, lend_usd -> S/B, buy -> Buy, sell -> Sell
+    const directionLabel = 
+      direction === 'borrow_usd' ? 'B/S' :
+      direction === 'lend_usd' ? 'S/B' :
+      direction === 'buy' ? 'Buy' : 'Sell';
+    
+    setTradeForm({ 
       instrument,
-      direction
-    }));
+      direction: directionLabel,
+      tradeDate: new Date().toISOString().split('T')[0],
+      nearDate: tradeType === 'swap' ? nearDate : '',
+      farDate: farDate,
+      spotRate: spot,
+      swapPoint: swapPoint || 0,
+      farRate: appliedRate,
+      ccy1: 'USD',
+      ccy2: 'KRW',
+      nearCcy1Amt: pricingNotional,
+      farCcy1Amt: pricingNotional,  // Even Swap이므로 같은 값
+      nearCcy2Amt: nearCcy2,
+      farCcy2Amt: farCcy2,
+      counterParty: '',
+      trader: ''
+    });
     
     // 조회 로그 저장 (tracking)
     const newLog = [...queryLog, queryData].slice(-100); // 최근 100건만
@@ -3861,8 +3897,16 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
   };
 
   const handleSaveTrade = () => {
-    addTrade({ ...tradeForm, clientId: selectedClientId, ccy2Amt: tradeForm.ccy1Amt * parseFloat(tradeForm.rate), queryTimestamp: lastQuery?.timestamp, fairValue: lastQuery?.forwardRate });
-    setShowTradeForm(false); setCountdown(null); setLastQuery(null); alert('거래가 기록되었습니다!');
+    addTrade({ 
+      ...tradeForm, 
+      clientId: selectedClientId,
+      queryTimestamp: lastQuery?.timestamp, 
+      fairValue: lastQuery?.forwardRate 
+    });
+    setShowTradeForm(false); 
+    setCountdown(null); 
+    setLastQuery(null); 
+    alert('거래가 기록되었습니다!');
   };
 
   const optimal = fxSwapPoints.filter(p => p.days > 0 && p.days <= 90).sort((a, b) => Math.abs(a.points) / a.days - Math.abs(b.points) / b.days)[0];
@@ -4410,24 +4454,277 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
           {/* 거래 기록 폼 */}
           {showTradeForm && (
             <div className="bg-kustody-surface rounded-xl p-5 border-2 border-kustody-accent">
-              <h3 className="font-semibold mb-4">📝 거래 기록</h3>
-              <p className="text-sm text-kustody-muted mb-4">방금 조회한 가격으로 거래하셨나요?</p>
-              <div className="grid grid-cols-3 gap-4 mb-4">
-                <div><label className="block text-xs text-kustody-muted mb-1">거래일</label><input type="date" value={tradeForm.tradeDate} onChange={(e) => setTradeForm({...tradeForm, tradeDate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
-                <div><label className="block text-xs text-kustody-muted mb-1">결제일</label><input type="date" value={tradeForm.settlementDate} onChange={(e) => setTradeForm({...tradeForm, settlementDate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
-                <div><label className="block text-xs text-kustody-muted mb-1">Instrument</label><select value={tradeForm.instrument} onChange={(e) => setTradeForm({...tradeForm, instrument: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="SPOT">Spot</option><option value="FX_SWAP">FX Swap</option><option value="OUTRIGHT">Outright</option></select></div>
-                <div><label className="block text-xs text-kustody-muted mb-1">CCY1</label><input value={tradeForm.ccy1} onChange={(e) => setTradeForm({...tradeForm, ccy1: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
-                <div>
-                  <label className="block text-xs text-kustody-muted mb-1">CCY1 금액</label>
-                  <input type="text" value={formatNumber(tradeForm.ccy1Amt, 0)} 
-                    onChange={(e) => setTradeForm({...tradeForm, ccy1Amt: parseFloat(e.target.value.replace(/,/g, '')) || 0})} 
-                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
-                  <div className="text-xs text-kustody-muted mt-1">≈ ₩{formatNumber(tradeForm.ccy1Amt * spot, 0)}</div>
-                </div>
-                <div><label className="block text-xs text-kustody-muted mb-1">환율</label><input value={tradeForm.rate} onChange={(e) => setTradeForm({...tradeForm, rate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" /></div>
-                <div><label className="block text-xs text-kustody-muted mb-1">거래상대방</label><select value={tradeForm.counterParty} onChange={(e) => setTradeForm({...tradeForm, counterParty: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="">선택</option>{(config.counterParties || []).map(cp => <option key={cp.cpId} value={cp.cpId}>{cp.name}</option>)}</select></div>
-                <div><label className="block text-xs text-kustody-muted mb-1">거래자</label><select value={tradeForm.trader} onChange={(e) => setTradeForm({...tradeForm, trader: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="">선택</option>{(config.users || []).filter(u => u.role === 'trader').map(u => <option key={u.userId} value={u.userId}>{u.name}</option>)}</select></div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">📝 거래 기록</h3>
+                <div className="text-xs text-kustody-muted">* 실제 거래 조건을 입력하세요</div>
               </div>
+              
+              {/* 기본 정보 */}
+              <div className="grid grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">Instrument</label>
+                  <select 
+                    value={tradeForm.instrument} 
+                    onChange={(e) => {
+                      const inst = e.target.value;
+                      const dir = inst === 'FX_SWAP' ? 'B/S' : 'Buy';
+                      setTradeForm({...tradeForm, instrument: inst, direction: dir});
+                    }}
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    <option value="FX_SWAP">🔄 FX Swap</option>
+                    <option value="OUTRIGHT">📤 Outright</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">Direction</label>
+                  <select 
+                    value={tradeForm.direction} 
+                    onChange={(e) => setTradeForm({...tradeForm, direction: e.target.value})}
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    {tradeForm.instrument === 'FX_SWAP' ? (
+                      <>
+                        <option value="B/S">B/S (외화 차입)</option>
+                        <option value="S/B">S/B (외화 대여)</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="Buy">Buy (매수)</option>
+                        <option value="Sell">Sell (매도)</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">거래일</label>
+                  <input type="date" value={tradeForm.tradeDate} 
+                    onChange={(e) => setTradeForm({...tradeForm, tradeDate: e.target.value})} 
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">거래상대방</label>
+                  <select value={tradeForm.counterParty} onChange={(e) => setTradeForm({...tradeForm, counterParty: e.target.value})} 
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    <option value="">선택</option>
+                    {(config.counterParties || []).map(cp => <option key={cp.cpId} value={cp.cpId}>{cp.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* FX Swap 상세 */}
+              {tradeForm.instrument === 'FX_SWAP' && (
+                <div className="bg-kustody-navy/30 rounded-lg p-4 mb-4">
+                  <div className="grid grid-cols-2 gap-6">
+                    {/* Near Leg */}
+                    <div>
+                      <div className="text-sm font-semibold text-blue-400 mb-3">
+                        Near Leg {tradeForm.direction === 'B/S' ? '(USD 매수)' : '(USD 매도)'}
+                      </div>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Near Date</label>
+                            <input type="date" value={tradeForm.nearDate} 
+                              onChange={(e) => setTradeForm({...tradeForm, nearDate: e.target.value})}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Start Rate</label>
+                            <input type="number" step="0.01" value={tradeForm.spotRate || ''} 
+                              onChange={(e) => {
+                                const spotRate = parseFloat(e.target.value) || 0;
+                                const farRate = spotRate + tradeForm.swapPoint;
+                                const nearCcy2 = tradeForm.nearCcy1Amt * spotRate;
+                                const farCcy2 = tradeForm.farCcy1Amt * farRate;
+                                setTradeForm({...tradeForm, spotRate, farRate, nearCcy2Amt: nearCcy2, farCcy2Amt: farCcy2});
+                              }}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Near CCY1 (USD)</label>
+                            <input 
+                              type="text" 
+                              value={formatNumber(tradeForm.nearCcy1Amt, 0)} 
+                              onChange={(e) => {
+                                const amt = parseFloat(e.target.value.replace(/,/g, '')) || 0;
+                                const nearCcy2 = amt * tradeForm.spotRate;
+                                setTradeForm({...tradeForm, nearCcy1Amt: amt, nearCcy2Amt: nearCcy2});
+                              }}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                            <div className="text-xs text-kustody-accent mt-1">{formatUsdKorean(tradeForm.nearCcy1Amt)}</div>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Near CCY2 (KRW)</label>
+                            <div className={`px-3 py-2 bg-kustody-dark/50 rounded text-sm font-mono ${tradeForm.direction === 'B/S' ? 'text-red-400' : 'text-green-400'}`}>
+                              {tradeForm.direction === 'B/S' ? '-' : '+'}{formatNumber(tradeForm.nearCcy2Amt, 0)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Far Leg */}
+                    <div>
+                      <div className="text-sm font-semibold text-purple-400 mb-3">
+                        Far Leg {tradeForm.direction === 'B/S' ? '(USD 매도)' : '(USD 매수)'}
+                      </div>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Far Date</label>
+                            <input type="date" value={tradeForm.farDate} 
+                              onChange={(e) => setTradeForm({...tradeForm, farDate: e.target.value})}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Swap Point</label>
+                            <input type="number" step="0.01" value={tradeForm.swapPoint || ''} 
+                              onChange={(e) => {
+                                const swapPoint = parseFloat(e.target.value) || 0;
+                                const farRate = tradeForm.spotRate + swapPoint;
+                                const farCcy2 = tradeForm.farCcy1Amt * farRate;
+                                setTradeForm({...tradeForm, swapPoint, farRate, farCcy2Amt: farCcy2});
+                              }}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Far CCY1 (USD)</label>
+                            <input 
+                              type="text" 
+                              value={formatNumber(tradeForm.farCcy1Amt, 0)} 
+                              onChange={(e) => {
+                                const amt = parseFloat(e.target.value.replace(/,/g, '')) || 0;
+                                const farCcy2 = amt * tradeForm.farRate;
+                                setTradeForm({...tradeForm, farCcy1Amt: amt, farCcy2Amt: farCcy2});
+                              }}
+                              className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                            <div className="text-xs text-kustody-accent mt-1">{formatUsdKorean(tradeForm.farCcy1Amt)}</div>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-kustody-muted mb-1">Far CCY2 (KRW)</label>
+                            <div className={`px-3 py-2 bg-kustody-dark/50 rounded text-sm font-mono ${tradeForm.direction === 'B/S' ? 'text-green-400' : 'text-red-400'}`}>
+                              {tradeForm.direction === 'B/S' ? '+' : '-'}{formatNumber(tradeForm.farCcy2Amt, 0)}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-kustody-muted mb-1">Far Rate</label>
+                          <div className="px-3 py-2 bg-kustody-dark/50 rounded text-sm font-mono">
+                            {formatNumber(tradeForm.farRate, 2)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Swap 요약 */}
+                  <div className="mt-4 pt-4 border-t border-kustody-border/30 grid grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="text-kustody-muted">기간: </span>
+                      <span className="font-mono font-semibold">
+                        {tradeForm.nearDate && tradeForm.farDate 
+                          ? Math.round((new Date(tradeForm.farDate) - new Date(tradeForm.nearDate)) / (1000*60*60*24)) + '일'
+                          : '-'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-kustody-muted">USD Net: </span>
+                      <span className={`font-mono ${tradeForm.nearCcy1Amt === tradeForm.farCcy1Amt ? '' : 'text-yellow-400'}`}>
+                        {tradeForm.nearCcy1Amt === tradeForm.farCcy1Amt ? '0 (Even)' : formatNumber(tradeForm.farCcy1Amt - tradeForm.nearCcy1Amt, 0)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-kustody-muted">KRW Net: </span>
+                      <span className={`font-mono font-semibold ${
+                        (tradeForm.direction === 'B/S' ? 1 : -1) * (tradeForm.farCcy2Amt - tradeForm.nearCcy2Amt) >= 0 
+                          ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        {formatNumber((tradeForm.direction === 'B/S' ? 1 : -1) * (tradeForm.farCcy2Amt - tradeForm.nearCcy2Amt), 0)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-kustody-muted">내재금리: </span>
+                      <span className="font-mono">
+                        {tradeForm.nearDate && tradeForm.farDate && tradeForm.spotRate
+                          ? (((tradeForm.swapPoint / tradeForm.spotRate) * (365 / Math.round((new Date(tradeForm.farDate) - new Date(tradeForm.nearDate)) / (1000*60*60*24)))) * 100).toFixed(2) + '%'
+                          : '-'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Outright 상세 */}
+              {tradeForm.instrument === 'OUTRIGHT' && (
+                <div className="bg-kustody-navy/30 rounded-lg p-4 mb-4">
+                  <div className="grid grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs text-kustody-muted mb-1">결제일</label>
+                      <input type="date" value={tradeForm.farDate} 
+                        onChange={(e) => setTradeForm({...tradeForm, farDate: e.target.value})}
+                        className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-kustody-muted mb-1">CCY1 Amount (USD)</label>
+                      <input 
+                        type="text" 
+                        value={formatNumber(tradeForm.farCcy1Amt, 0)} 
+                        onChange={(e) => {
+                          const amt = parseFloat(e.target.value.replace(/,/g, '')) || 0;
+                          const farCcy2 = amt * tradeForm.farRate;
+                          setTradeForm({...tradeForm, farCcy1Amt: amt, farCcy2Amt: farCcy2});
+                        }}
+                        className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                      <div className="text-xs text-kustody-accent mt-1">{formatUsdKorean(tradeForm.farCcy1Amt)}</div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-kustody-muted mb-1">환율</label>
+                      <input type="number" step="0.01" value={tradeForm.farRate || ''} 
+                        onChange={(e) => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          setTradeForm({...tradeForm, farRate: rate, farCcy2Amt: tradeForm.farCcy1Amt * rate});
+                        }}
+                        className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-kustody-muted mb-1">CCY2 Amount (KRW)</label>
+                      <div className={`px-3 py-2 bg-kustody-dark/50 rounded text-sm font-mono ${tradeForm.direction === 'Buy' ? 'text-red-400' : 'text-green-400'}`}>
+                        {tradeForm.direction === 'Buy' ? '-' : '+'}₩{formatNumber(tradeForm.farCcy2Amt, 0)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-kustody-border/30 grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-kustody-muted">USD: </span>
+                      <span className={`font-mono font-semibold ${tradeForm.direction === 'Buy' ? 'text-green-400' : 'text-red-400'}`}>
+                        {tradeForm.direction === 'Buy' ? '+' : '-'}{formatNumber(tradeForm.farCcy1Amt, 0)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-kustody-muted">KRW: </span>
+                      <span className={`font-mono font-semibold ${tradeForm.direction === 'Buy' ? 'text-red-400' : 'text-green-400'}`}>
+                        {tradeForm.direction === 'Buy' ? '-' : '+'}₩{formatNumber(tradeForm.farCcy2Amt, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 거래자 */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">거래자</label>
+                  <select value={tradeForm.trader} onChange={(e) => setTradeForm({...tradeForm, trader: e.target.value})} 
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    <option value="">선택</option>
+                    {(config.users || []).filter(u => u.role === 'trader').map(u => <option key={u.userId} value={u.userId}>{u.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <button onClick={handleSaveTrade} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded font-semibold">💾 저장</button>
                 <button onClick={() => setShowTradeForm(false)} className="px-4 py-2 bg-kustody-navy text-kustody-text rounded">취소</button>
@@ -4461,8 +4758,10 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
 
 // ==================== Blotter Tab ====================
 function BlotterTab({ blotter, config, deleteTrade, selectedClientId, setSelectedClientId }) {
+  const [expandedRow, setExpandedRow] = useState(null);
   const getCP = (cpId) => (config.counterParties || []).find(c => c.cpId === cpId)?.name || cpId;
   const getClient = (clientId) => config.clients?.find(c => c.clientId === clientId)?.clientName || '';
+  const getTrader = (traderId) => (config.users || []).find(u => u.userId === traderId)?.name || traderId;
   
   // 고객 필터 적용
   const filteredBlotter = selectedClientId 
@@ -4505,34 +4804,202 @@ function BlotterTab({ blotter, config, deleteTrade, selectedClientId, setSelecte
       <div className="bg-kustody-surface rounded-xl p-5"><div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border">
+            <th className="text-left py-2 px-2 w-8"></th>
             <th className="text-left py-2 px-2">Trade ID</th>
             {!selectedClientId && <th className="text-left py-2 px-2">고객</th>}
             <th className="text-left py-2 px-2">거래일</th>
-            <th className="text-left py-2 px-2">결제일</th>
             <th className="text-center py-2 px-2">Instrument</th>
-            <th className="text-right py-2 px-2">CCY1</th>
+            <th className="text-center py-2 px-2">Direction</th>
+            <th className="text-left py-2 px-2">Near Date</th>
+            <th className="text-left py-2 px-2">Far Date</th>
             <th className="text-right py-2 px-2">CCY1 Amt</th>
-            <th className="text-right py-2 px-2">CCY2 Amt</th>
-            <th className="text-right py-2 px-2">환율</th>
+            <th className="text-right py-2 px-2">Rate</th>
             <th className="text-left py-2 px-2">상대방</th>
             <th className="text-center py-2 px-2">삭제</th>
           </tr></thead>
           <tbody>{filteredBlotter.length === 0 ? (
-            <tr><td colSpan={selectedClientId ? "10" : "11"} className="py-8 text-center text-kustody-muted">거래 내역이 없습니다.</td></tr>
+            <tr><td colSpan={selectedClientId ? "11" : "12"} className="py-8 text-center text-kustody-muted">거래 내역이 없습니다.</td></tr>
           ) : filteredBlotter.map(t => (
-            <tr key={t.tradeId} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
-              <td className="py-2 px-2 font-mono text-xs">{t.tradeId}</td>
-              {!selectedClientId && <td className="py-2 px-2 text-xs">{getClient(t.clientId)}</td>}
-              <td className="py-2 px-2 font-mono text-xs">{t.tradeDate}</td>
-              <td className="py-2 px-2 font-mono text-xs">{t.settlementDate}</td>
-              <td className="py-2 px-2 text-center"><span className={`px-2 py-0.5 rounded text-xs ${t.instrument === 'SPOT' ? 'bg-blue-500/20 text-blue-400' : t.instrument === 'FX_SWAP' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>{t.instrument}</span></td>
-              <td className="py-2 px-2 text-right font-mono">{t.ccy1}</td>
-              <td className="py-2 px-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td>
-              <td className="py-2 px-2 text-right font-mono">{formatNumber(t.ccy2Amt, 0)}</td>
-              <td className="py-2 px-2 text-right font-mono text-kustody-accent">{formatNumber(parseFloat(t.rate), 2)}</td>
-              <td className="py-2 px-2 text-xs">{getCP(t.counterParty)}</td>
-              <td className="py-2 px-2 text-center"><button onClick={() => deleteTrade(t.tradeId)} className="text-red-400 hover:text-red-300">✕</button></td>
-            </tr>
+            <Fragment key={t.tradeId}>
+              {/* 메인 행 */}
+              <tr 
+                className={`border-b border-kustody-border/30 hover:bg-kustody-navy/20 cursor-pointer ${expandedRow === t.tradeId ? 'bg-kustody-navy/30' : ''}`}
+                onClick={() => setExpandedRow(expandedRow === t.tradeId ? null : t.tradeId)}
+              >
+                <td className="py-2 px-2 text-kustody-muted">
+                  {expandedRow === t.tradeId ? '▼' : '▶'}
+                </td>
+                <td className="py-2 px-2 font-mono text-xs">{t.tradeId}</td>
+                {!selectedClientId && <td className="py-2 px-2 text-xs">{getClient(t.clientId)}</td>}
+                <td className="py-2 px-2 font-mono text-xs">{t.tradeDate}</td>
+                <td className="py-2 px-2 text-center">
+                  <span className={`px-2 py-0.5 rounded text-xs ${
+                    t.instrument === 'FX_SWAP' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'
+                  }`}>
+                    {t.instrument === 'FX_SWAP' ? '🔄 Swap' : '📤 Outright'}
+                  </span>
+                </td>
+                <td className="py-2 px-2 text-center">
+                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                    t.direction === 'B/S' ? 'bg-blue-500/20 text-blue-400' :
+                    t.direction === 'S/B' ? 'bg-orange-500/20 text-orange-400' :
+                    t.direction === 'Buy' ? 'bg-green-500/20 text-green-400' :
+                    'bg-red-500/20 text-red-400'
+                  }`}>
+                    {t.direction}
+                  </span>
+                </td>
+                <td className="py-2 px-2 font-mono text-xs">{t.nearDate || '-'}</td>
+                <td className="py-2 px-2 font-mono text-xs">{t.farDate}</td>
+                <td className="py-2 px-2 text-right font-mono">
+                  {t.instrument === 'FX_SWAP' 
+                    ? formatNumber(t.nearCcy1Amt || t.farCcy1Amt, 0)
+                    : formatNumber(t.farCcy1Amt, 0)}
+                </td>
+                <td className="py-2 px-2 text-right font-mono text-kustody-accent">
+                  {t.instrument === 'FX_SWAP' 
+                    ? `${formatNumber(t.spotRate, 2)} (${t.swapPoint >= 0 ? '+' : ''}${t.swapPoint?.toFixed(2) || '-'})`
+                    : formatNumber(t.farRate, 2)}
+                </td>
+                <td className="py-2 px-2 text-xs">{getCP(t.counterParty)}</td>
+                <td className="py-2 px-2 text-center">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); deleteTrade(t.tradeId); }} 
+                    className="text-red-400 hover:text-red-300"
+                  >✕</button>
+                </td>
+              </tr>
+              
+              {/* 확장 상세 행 */}
+              {expandedRow === t.tradeId && (
+                <tr className="bg-kustody-navy/20">
+                  <td colSpan={selectedClientId ? "11" : "12"} className="py-4 px-6">
+                    <div className="grid grid-cols-2 gap-6">
+                      {/* FX Swap 상세 */}
+                      {t.instrument === 'FX_SWAP' && (
+                        <>
+                          <div className="space-y-3">
+                            <div className="text-sm font-semibold text-blue-400">Near Leg</div>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div>
+                                <span className="text-kustody-muted">Date: </span>
+                                <span className="font-mono">{t.nearDate}</span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">Rate: </span>
+                                <span className="font-mono">{formatNumber(t.spotRate, 2)}</span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">USD: </span>
+                                <span className={`font-mono ${t.direction === 'B/S' ? 'text-green-400' : 'text-red-400'}`}>
+                                  {t.direction === 'B/S' ? '+' : '-'}{formatNumber(t.nearCcy1Amt, 0)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">KRW: </span>
+                                <span className={`font-mono ${t.direction === 'B/S' ? 'text-red-400' : 'text-green-400'}`}>
+                                  {t.direction === 'B/S' ? '-' : '+'}{formatNumber(t.nearCcy2Amt, 0)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            <div className="text-sm font-semibold text-purple-400">Far Leg</div>
+                            <div className="grid grid-cols-2 gap-2 text-sm">
+                              <div>
+                                <span className="text-kustody-muted">Date: </span>
+                                <span className="font-mono">{t.farDate}</span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">Rate: </span>
+                                <span className="font-mono">{formatNumber(t.farRate, 2)}</span>
+                                <span className="text-kustody-muted text-xs ml-1">
+                                  (Swap: {t.swapPoint >= 0 ? '+' : ''}{t.swapPoint?.toFixed(2)})
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">USD: </span>
+                                <span className={`font-mono ${t.direction === 'B/S' ? 'text-red-400' : 'text-green-400'}`}>
+                                  {t.direction === 'B/S' ? '-' : '+'}{formatNumber(t.farCcy1Amt, 0)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-kustody-muted">KRW: </span>
+                                <span className={`font-mono ${t.direction === 'B/S' ? 'text-green-400' : 'text-red-400'}`}>
+                                  {t.direction === 'B/S' ? '+' : '-'}{formatNumber(t.farCcy2Amt, 0)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      
+                      {/* Outright 상세 */}
+                      {t.instrument === 'OUTRIGHT' && (
+                        <div className="space-y-3 col-span-2">
+                          <div className="text-sm font-semibold text-green-400">Settlement</div>
+                          <div className="grid grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <span className="text-kustody-muted">Date: </span>
+                              <span className="font-mono">{t.farDate}</span>
+                            </div>
+                            <div>
+                              <span className="text-kustody-muted">Rate: </span>
+                              <span className="font-mono">{formatNumber(t.farRate, 2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-kustody-muted">USD: </span>
+                              <span className={`font-mono ${t.direction === 'Buy' ? 'text-green-400' : 'text-red-400'}`}>
+                                {t.direction === 'Buy' ? '+' : '-'}{formatNumber(t.farCcy1Amt, 0)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-kustody-muted">KRW: </span>
+                              <span className={`font-mono ${t.direction === 'Buy' ? 'text-red-400' : 'text-green-400'}`}>
+                                {t.direction === 'Buy' ? '-' : '+'}{formatNumber(t.farCcy2Amt, 0)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 공통 정보 */}
+                    <div className="mt-4 pt-4 border-t border-kustody-border/30 grid grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="text-kustody-muted">거래자: </span>
+                        <span>{getTrader(t.trader) || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-kustody-muted">거래상대방: </span>
+                        <span>{getCP(t.counterParty) || '-'}</span>
+                      </div>
+                      {t.instrument === 'FX_SWAP' && (
+                        <>
+                          <div>
+                            <span className="text-kustody-muted">기간: </span>
+                            <span className="font-mono">
+                              {t.nearDate && t.farDate 
+                                ? Math.round((new Date(t.farDate) - new Date(t.nearDate)) / (1000*60*60*24)) + '일'
+                                : '-'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-kustody-muted">KRW Net: </span>
+                            <span className={`font-mono font-semibold ${
+                              (t.direction === 'B/S' ? 1 : -1) * ((t.farCcy2Amt || 0) - (t.nearCcy2Amt || 0)) >= 0 
+                                ? 'text-green-400' : 'text-red-400'
+                            }`}>
+                              {formatNumber((t.direction === 'B/S' ? 1 : -1) * ((t.farCcy2Amt || 0) - (t.nearCcy2Amt || 0)), 0)}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}</tbody>
         </table>
       </div></div>
@@ -4579,8 +5046,48 @@ function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientI
 
   const schedule = (() => {
     const today = new Date(), flows = {};
-    filteredBlotter.forEach(t => { const d = t.settlementDate; if (!flows[d]) flows[d] = { SPOT: 0, SWAP: 0, OUTRIGHT: 0 }; const amt = t.ccy1 === selectedCcy ? -t.ccy1Amt : t.ccy2Amt; flows[d][t.instrument === 'SPOT' ? 'SPOT' : t.instrument === 'FX_SWAP' ? 'SWAP' : 'OUTRIGHT'] += amt || 0; });
-    return Object.entries(flows).map(([date, f]) => { const days = Math.round((new Date(date) - today) / 864e5); const sum = f.SPOT + f.SWAP + f.OUTRIGHT; const df = getDF(days, selectedCcy); return { date, days, sum, df, npv: sum * df, ...f }; }).sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    const addFlow = (date, instrument, amt) => {
+      if (!date || !amt) return;
+      if (!flows[date]) flows[date] = { SWAP: 0, OUTRIGHT: 0 };
+      flows[date][instrument] += amt;
+    };
+    
+    filteredBlotter.forEach(t => {
+      if (t.instrument === 'FX_SWAP') {
+        // Near leg
+        if (selectedCcy === 'USD') {
+          const nearUsd = t.direction === 'B/S' ? t.nearCcy1Amt : -t.nearCcy1Amt;
+          addFlow(t.nearDate, 'SWAP', nearUsd);
+        } else {
+          const nearKrw = t.direction === 'B/S' ? -t.nearCcy2Amt : t.nearCcy2Amt;
+          addFlow(t.nearDate, 'SWAP', nearKrw);
+        }
+        // Far leg
+        if (selectedCcy === 'USD') {
+          const farUsd = t.direction === 'B/S' ? -t.farCcy1Amt : t.farCcy1Amt;
+          addFlow(t.farDate, 'SWAP', farUsd);
+        } else {
+          const farKrw = t.direction === 'B/S' ? t.farCcy2Amt : -t.farCcy2Amt;
+          addFlow(t.farDate, 'SWAP', farKrw);
+        }
+      } else if (t.instrument === 'OUTRIGHT') {
+        if (selectedCcy === 'USD') {
+          const usd = t.direction === 'Buy' ? t.farCcy1Amt : -t.farCcy1Amt;
+          addFlow(t.farDate, 'OUTRIGHT', usd);
+        } else {
+          const krw = t.direction === 'Buy' ? -t.farCcy2Amt : t.farCcy2Amt;
+          addFlow(t.farDate, 'OUTRIGHT', krw);
+        }
+      }
+    });
+    
+    return Object.entries(flows).map(([date, f]) => { 
+      const days = Math.round((new Date(date) - today) / 864e5); 
+      const sum = f.SWAP + f.OUTRIGHT; 
+      const df = getDF(days, selectedCcy); 
+      return { date, days, sum, df, npv: sum * df, ...f }; 
+    }).sort((a, b) => new Date(a.date) - new Date(b.date));
   })();
   const totalNPV = schedule.reduce((s, r) => s + r.npv, 0);
 
@@ -4614,19 +5121,18 @@ function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientI
       
       <div className="bg-kustody-surface rounded-xl p-5"><div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">날짜</th><th className="text-right py-2 px-2">SUM</th><th className="text-right py-2 px-2">DF</th><th className="text-right py-2 px-2">NPV</th><th className="text-right py-2 px-2">SPOT</th><th className="text-right py-2 px-2">SWAP</th><th className="text-right py-2 px-2">OUTRIGHT</th></tr></thead>
-          <tbody>{schedule.length === 0 ? <tr><td colSpan="7" className="py-8 text-center text-kustody-muted">데이터가 없습니다.</td></tr> : schedule.map((r, i) => (
+          <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">날짜</th><th className="text-right py-2 px-2">SUM</th><th className="text-right py-2 px-2">DF</th><th className="text-right py-2 px-2">NPV</th><th className="text-right py-2 px-2">SWAP</th><th className="text-right py-2 px-2">OUTRIGHT</th></tr></thead>
+          <tbody>{schedule.length === 0 ? <tr><td colSpan="6" className="py-8 text-center text-kustody-muted">데이터가 없습니다.</td></tr> : schedule.map((r, i) => (
             <tr key={i} className="border-b border-kustody-border/30">
               <td className="py-2 px-2 font-mono">{r.date}</td>
               <td className={`py-2 px-2 text-right font-mono ${r.sum >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.sum, 0)}</td>
               <td className="py-2 px-2 text-right font-mono text-kustody-muted">{r.df.toFixed(8)}</td>
               <td className={`py-2 px-2 text-right font-mono ${r.npv >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.npv, 2)}</td>
-              <td className="py-2 px-2 text-right font-mono text-blue-400">{r.SPOT !== 0 ? formatNumber(r.SPOT, 0) : '-'}</td>
               <td className="py-2 px-2 text-right font-mono text-purple-400">{r.SWAP !== 0 ? formatNumber(r.SWAP, 0) : '-'}</td>
               <td className="py-2 px-2 text-right font-mono text-green-400">{r.OUTRIGHT !== 0 ? formatNumber(r.OUTRIGHT, 0) : '-'}</td>
             </tr>
           ))}</tbody>
-          <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td className="py-2 px-2">Total NPV</td><td colSpan="2"></td><td className={`py-2 px-2 text-right font-mono ${totalNPV >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalNPV, 2)}</td><td colSpan="3"></td></tr></tfoot>
+          <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td className="py-2 px-2">Total NPV</td><td colSpan="2"></td><td className={`py-2 px-2 text-right font-mono ${totalNPV >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalNPV, 2)}</td><td colSpan="2"></td></tr></tfoot>
         </table>
       </div></div>
     </div>
