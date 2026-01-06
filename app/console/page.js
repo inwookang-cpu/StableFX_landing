@@ -1,0 +1,4455 @@
+'use client';
+
+import '../globals.css';
+import { useState, useEffect, useMemo } from 'react';
+import { 
+  DateRuleCalculator, 
+  CALENDAR_MAP, 
+  TENORS, 
+  DATE_RULES,
+  formatDate,
+  getDayName,
+  getDayNameEn
+} from '../../lib/dateCalculator';
+
+// Enter 또는 blur 시에만 값을 반영하는 Input 컴포넌트
+function DeferredInput({ value, onCommit, className, placeholder, type = 'text' }) {
+  const [localValue, setLocalValue] = useState(value || '');
+  
+  useEffect(() => {
+    setLocalValue(value || '');
+  }, [value]);
+  
+  const handleCommit = () => {
+    if (localValue !== (value || '')) {
+      onCommit(localValue);
+    }
+  };
+  
+  return (
+    <input
+      type={type}
+      placeholder={placeholder}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleCommit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleCommit();
+          e.target.blur();
+        }
+      }}
+      className={className}
+    />
+  );
+}
+
+const DEFAULT_HOLIDAYS = {
+  KR: [
+    {"date": "2025-01-01", "name": "신정", "type": "fixed"},
+    {"date": "2025-03-01", "name": "삼일절", "type": "fixed"},
+    {"date": "2025-05-05", "name": "어린이날", "type": "fixed"},
+    {"date": "2025-06-06", "name": "현충일", "type": "fixed"},
+    {"date": "2025-08-15", "name": "광복절", "type": "fixed"},
+    {"date": "2025-10-03", "name": "개천절", "type": "fixed"},
+    {"date": "2025-10-09", "name": "한글날", "type": "fixed"},
+    {"date": "2025-12-25", "name": "크리스마스", "type": "fixed"},
+  ],
+  US: [
+    {"date": "2025-01-01", "name": "New Year's Day", "type": "fixed"},
+    {"date": "2025-07-04", "name": "Independence Day", "type": "fixed"},
+    {"date": "2025-12-25", "name": "Christmas", "type": "fixed"},
+  ]
+};
+
+export default function Console() {
+  const [activeTab, setActiveTab] = useState('calculator');
+  const [holidays, setHolidays] = useState({ KR: [], US: [] });
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // 금융결제원 은행코드
+  const BANK_CODES = [
+    { code: "004", name: "KB국민은행" },
+    { code: "011", name: "NH농협은행" },
+    { code: "020", name: "우리은행" },
+    { code: "081", name: "하나은행" },
+    { code: "088", name: "신한은행" },
+    { code: "003", name: "IBK기업은행" },
+    { code: "023", name: "SC제일은행" },
+    { code: "027", name: "한국씨티은행" },
+    { code: "071", name: "우체국" },
+    { code: "089", name: "케이뱅크" },
+    { code: "090", name: "카카오뱅크" },
+    { code: "092", name: "토스뱅크" },
+    { code: "005", name: "외환은행" },
+    { code: "032", name: "부산은행" },
+    { code: "031", name: "대구은행" },
+    { code: "039", name: "경남은행" },
+    { code: "034", name: "광주은행" },
+    { code: "037", name: "전북은행" },
+    { code: "035", name: "제주은행" },
+  ];
+
+  // Company Config & Clients 관리
+  const DEFAULT_CONFIG = {
+    companyId: "KUSTODYFI",
+    companyName: "KustodyFi Co., Ltd.",
+    creditTiers: {
+      "1": { name: "Prime", pointMargin: 0, bpMargin: 0 },
+      "2": { name: "Standard", pointMargin: 5, bpMargin: 5 },
+      "3": { name: "Subprime", pointMargin: 20, bpMargin: 15 },
+      "4": { name: "Discouraged", pointMargin: 100, bpMargin: 50 },
+      "5": { name: "Blocked", pointMargin: null, bpMargin: null }
+    },
+    notionalTiers: [
+      { min: 0, max: 1000000, margin: 10, name: "Small (<$1M)" },
+      { min: 1000000, max: 10000000, margin: 0, name: "Standard ($1M~$10M)" },
+      { min: 10000000, max: null, margin: 5, name: "Large (>$10M)" }
+    ],
+    counterParties: [
+      { cpId: "CP001", bankCode: "004", name: "KB국민은행", accounts: { USD: "123-456-789", KRW: "987-654-321" } },
+      { cpId: "CP002", bankCode: "088", name: "신한은행", accounts: { USD: "111-222-333", KRW: "333-222-111" } },
+      { cpId: "CP003", bankCode: "081", name: "하나은행", accounts: { USD: "444-555-666", KRW: "666-555-444" } },
+    ],
+    users: [
+      { userId: "U001", name: "홍길동", role: "trader" },
+      { userId: "U002", name: "김철수", role: "input" },
+      { userId: "U003", name: "이영희", role: "approver" },
+    ],
+    clients: [
+      {
+        clientId: "NPS001",
+        clientName: "국민연금",
+        creditTier: 1,
+        marginType: "point",
+        overrides: { ignoreCredit: true, ignoreNotional: true, customMargin: null },
+        sealLayer: { status: "active", walletAddress: "0x1234...abcd", lastSync: "2025-01-06T10:00:00Z", kycStatus: "approved" },
+        // 고객별 설정
+        bankAccounts: [
+          { bankCode: "004", bankName: "KB국민은행", usdAccount: "123-45-678901", krwAccount: "123-45-678902" },
+          { bankCode: "088", bankName: "신한은행", usdAccount: "110-123-456789", krwAccount: "110-123-456790" },
+        ],
+        traders: [
+          { name: "박재무", role: "trader", phone: "02-1234-5678", email: "park@nps.or.kr" },
+          { name: "김승인", role: "approver", phone: "02-1234-5679", email: "kim@nps.or.kr" },
+        ]
+      },
+      {
+        clientId: "ABC001",
+        clientName: "ABC증권",
+        creditTier: 2,
+        marginType: "bp",
+        overrides: {},
+        sealLayer: { status: "active", walletAddress: "0x5678...efgh", lastSync: "2025-01-06T09:30:00Z", kycStatus: "approved" },
+        bankAccounts: [
+          { bankCode: "081", bankName: "하나은행", usdAccount: "267-910123-45678", krwAccount: "267-910123-45679" },
+        ],
+        traders: [
+          { name: "이트레이더", role: "trader", phone: "02-2222-3333", email: "lee@abc.com" },
+        ]
+      },
+      {
+        clientId: "XYZ001",
+        clientName: "XYZ캐피탈",
+        creditTier: 3,
+        marginType: "point",
+        overrides: {},
+        sealLayer: { status: "pending", walletAddress: "", lastSync: null, kycStatus: "pending" },
+        bankAccounts: [],
+        traders: []
+      },
+      {
+        clientId: "DEF001",
+        clientName: "DEF투자",
+        creditTier: 5,
+        marginType: "point",
+        overrides: {},
+        sealLayer: { status: "blocked", walletAddress: "", lastSync: null, kycStatus: "rejected", reason: "AML 검토 중" },
+        bankAccounts: [],
+        traders: []
+      }
+    ]
+  };
+
+  const [companyConfig, setCompanyConfig] = useState(DEFAULT_CONFIG);
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [pricingNotional, setPricingNotional] = useState(5000000);
+  const [editingClient, setEditingClient] = useState(null);
+  const [showClientModal, setShowClientModal] = useState(false);
+
+  // Blotter (거래 기록)
+  const [blotter, setBlotter] = useState([]);
+  
+  // Valuation 설정
+  const [fixingRate, setFixingRate] = useState(1450.50); // 재무환율
+
+  // localStorage에서 Config 로드
+  useEffect(() => {
+    const saved = localStorage.getItem('kustodyfi_config');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setCompanyConfig(parsed);
+      } catch (e) {
+        console.warn('Failed to load config:', e);
+      }
+    }
+    // Blotter 로드
+    const savedBlotter = localStorage.getItem('kustodyfi_blotter');
+    if (savedBlotter) {
+      try {
+        setBlotter(JSON.parse(savedBlotter));
+      } catch (e) {
+        console.warn('Failed to load blotter:', e);
+      }
+    }
+  }, []);
+
+  // Blotter 저장
+  const saveBlotter = (newBlotter) => {
+    setBlotter(newBlotter);
+    localStorage.setItem('kustodyfi_blotter', JSON.stringify(newBlotter));
+  };
+
+  // 거래 추가
+  const addTrade = (trade) => {
+    const newTrade = {
+      ...trade,
+      tradeId: `T${Date.now()}`,
+      inputTime: new Date().toISOString(),
+    };
+    const newBlotter = [...blotter, newTrade];
+    saveBlotter(newBlotter);
+    return newTrade;
+  };
+
+  // 거래 삭제
+  const deleteTrade = (tradeId) => {
+    const newBlotter = blotter.filter(t => t.tradeId !== tradeId);
+    saveBlotter(newBlotter);
+  };
+
+  // Config 저장 함수
+  const saveConfig = () => {
+    localStorage.setItem('kustodyfi_config', JSON.stringify(companyConfig));
+    alert('Config 저장 완료!');
+  };
+
+  // Config 내보내기
+  const exportConfig = () => {
+    const blob = new Blob([JSON.stringify(companyConfig, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${companyConfig.companyId}_config.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Config 가져오기
+  const importConfig = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        setCompanyConfig(parsed);
+        localStorage.setItem('kustodyfi_config', JSON.stringify(parsed));
+        alert('Config 가져오기 완료!');
+      } catch (err) {
+        alert('잘못된 JSON 파일입니다.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Client 추가/수정
+  const saveClient = (client) => {
+    setCompanyConfig(prev => {
+      const existing = prev.clients.findIndex(c => c.clientId === client.clientId);
+      const newClients = [...prev.clients];
+      if (existing >= 0) {
+        newClients[existing] = client;
+      } else {
+        newClients.push(client);
+      }
+      return { ...prev, clients: newClients };
+    });
+    setShowClientModal(false);
+    setEditingClient(null);
+  };
+
+  // Client 삭제
+  const deleteClient = (clientId) => {
+    if (!confirm('정말 삭제하시겠습니까?')) return;
+    setCompanyConfig(prev => ({
+      ...prev,
+      clients: prev.clients.filter(c => c.clientId !== clientId)
+    }));
+  };
+
+  useEffect(() => {
+    const loadHolidays = async () => {
+      const loaded = {};
+      const years = [2025, 2026, 2027, 2028, 2029, 2030, 2031];
+      for (const country of ['KR', 'US']) {
+        loaded[country] = [];
+        for (const year of years) {
+          try {
+            const res = await fetch(`/holidays/${country.toLowerCase()}_${year}.json`);
+            if (res.ok) { const data = await res.json(); loaded[country] = [...loaded[country], ...data.holidays]; }
+          } catch {}
+        }
+        if (loaded[country].length === 0) loaded[country] = DEFAULT_HOLIDAYS[country] || [];
+      }
+      setHolidays(loaded);
+      setIsLoaded(true);
+    };
+    loadHolidays();
+  }, []);
+
+  const tabs = [
+    { id: 'calculator', label: '🧮 Date 계산' },
+    { id: 'curves', label: '📈 Curves' },
+    { id: 'clients', label: '👥 Clients' },
+    { id: 'clientPricing', label: '💰 Client Pricing' },
+    { id: 'advisory', label: '🎯 Advisory' },
+    { id: 'blotter', label: '📋 Blotter' },
+    { id: 'cashSchedule', label: '💵 Cash Schedule' },
+    { id: 'valuation', label: '📊 Valuation' },
+    { id: 'config', label: '⚙️ Settings' },
+  ];
+
+  return (
+    <div className="min-h-screen bg-kustody-dark">
+      <header className="border-b border-kustody-border bg-kustody-surface/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <a href="/" className="w-8 h-8 rounded-lg bg-gradient-to-br from-kustody-accent to-kustody-accent-dim flex items-center justify-center text-kustody-dark font-bold text-sm hover:opacity-80 transition-opacity">K</a>
+              <div><h1 className="text-lg font-semibold text-kustody-text">FX Professional Console</h1><p className="text-xs text-kustody-muted">커브 관리 · 고객 설정 · 거래 기록 · 밸류에이션</p></div>
+            </div>
+            <div className="flex items-center gap-4">
+              <a href="/" className="text-xs text-kustody-muted hover:text-kustody-accent transition-colors">← StableFX 홈</a>
+              <div className="text-xs text-kustody-muted font-mono">KustodyFi</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="border-b border-kustody-border bg-kustody-surface/30">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex gap-1 overflow-x-auto">
+            {tabs.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`px-5 py-3 text-sm font-medium transition-all relative whitespace-nowrap ${activeTab === tab.id ? 'text-kustody-accent' : 'text-kustody-muted hover:text-kustody-text'}`}>
+                {tab.label}
+                {activeTab === tab.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-kustody-accent" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {!isLoaded ? <div className="text-center py-20 text-kustody-muted">로딩 중...</div> : (
+          <>
+            {activeTab === 'calculator' && <CalculatorTab holidays={holidays} />}
+            {activeTab === 'config' && (
+              <SettingsTab 
+                config={companyConfig}
+                setConfig={setCompanyConfig}
+                saveConfig={saveConfig} 
+                bankCodes={BANK_CODES}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+              />
+            )}
+            {activeTab === 'curves' && <CurvesTab />}
+            {activeTab === 'clients' && (
+              <ClientsTab 
+                config={companyConfig}
+                setConfig={setCompanyConfig}
+                saveConfig={saveConfig}
+                exportConfig={exportConfig}
+                importConfig={importConfig}
+                editingClient={editingClient}
+                setEditingClient={setEditingClient}
+                showClientModal={showClientModal}
+                setShowClientModal={setShowClientModal}
+                saveClient={saveClient}
+                deleteClient={deleteClient}
+              />
+            )}
+            {activeTab === 'clientPricing' && (
+              <ClientPricingTab 
+                config={companyConfig}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+                pricingNotional={pricingNotional}
+                setPricingNotional={setPricingNotional}
+              />
+            )}
+            {activeTab === 'advisory' && (
+              <AdvisoryTab 
+                config={companyConfig}
+                addTrade={addTrade}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+                pricingNotional={pricingNotional}
+                setPricingNotional={setPricingNotional}
+              />
+            )}
+            {activeTab === 'blotter' && (
+              <BlotterTab 
+                blotter={blotter}
+                config={companyConfig}
+                deleteTrade={deleteTrade}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+              />
+            )}
+            {activeTab === 'cashSchedule' && (
+              <CashScheduleTab 
+                blotter={blotter}
+                config={companyConfig}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+              />
+            )}
+            {activeTab === 'valuation' && (
+              <ValuationTab 
+                blotter={blotter}
+                fixingRate={fixingRate}
+                setFixingRate={setFixingRate}
+              />
+            )}
+          </>
+        )}
+      </main>
+
+      <footer className="border-t border-kustody-border py-6 mt-auto">
+        <div className="max-w-7xl mx-auto px-6 text-center text-xs text-kustody-muted">KustodyFi © 2025 · FX Professional Console v1.0</div>
+      </footer>
+    </div>
+  );
+}
+
+function CalculatorTab({ holidays }) {
+  const today = formatDate(new Date());
+  
+  const [currencyPair, setCurrencyPair] = useState('USDKRW');
+  const [tradeDate, setTradeDate] = useState(today);
+  const [tenor, setTenor] = useState('1M');
+  const [dateRule, setDateRule] = useState('MD_FOLLOWING');
+  const [spotDays, setSpotDays] = useState(2);
+  const [eomRule, setEomRule] = useState(true);
+
+  // 지원 통화쌍 (Direct only)
+  const supportedPairs = ['USDKRW', 'USDJPY', 'EURUSD'];
+
+  useEffect(() => { 
+    const config = CALENDAR_MAP[currencyPair]; 
+    if (config) setSpotDays(config.spotDays); 
+  }, [currencyPair]);
+
+  const result = useMemo(() => {
+    const config = CALENDAR_MAP[currencyPair] || { calendars: ['KR', 'US'], spotDays: 2 };
+    const calendars = config.calendars;
+    const holidayCalendars = {};
+    for (const cal of calendars) { if (holidays[cal]) holidayCalendars[cal] = holidays[cal]; }
+    const calc = new DateRuleCalculator(holidayCalendars);
+    const tradeDt = new Date(tradeDate + 'T00:00:00');
+    let spotDate = new Date(tradeDt);
+    for (let i = 0; i < spotDays; i++) spotDate = calc.nextBusinessDay(spotDate, true, calendars);
+    let maturityDate = tenor === 'SPOT' ? spotDate : calc.addTenor(tradeDt, tenor, spotDays, calendars, eomRule);
+    return {
+      tradeDate: tradeDt, spotDate, maturityDate,
+      isTradeBD: calc.isBusinessDay(tradeDt, calendars),
+      isSpotEOM: calc.isEndOfMonthBusinessDay(spotDate, calendars),
+      daysToMaturity: Math.round((maturityDate - spotDate) / (1000 * 60 * 60 * 24)),
+      businessDays: calc.countBusinessDays(spotDate, maturityDate, calendars),
+      calendars
+    };
+  }, [currencyPair, tradeDate, tenor, spotDays, eomRule, holidays]);
+
+  return (
+    <div className="grid lg:grid-cols-2 gap-8 animate-fade-in">
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 mb-4"><div className="w-1 h-6 bg-kustody-accent rounded-full" /><h2 className="text-lg font-semibold">입력</h2></div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-kustody-muted mb-2">통화쌍</label>
+            <select 
+              value={currencyPair} 
+              onChange={(e) => setCurrencyPair(e.target.value)} 
+              className="w-full"
+            >
+              {supportedPairs.map(pair => <option key={pair} value={pair}>{pair}</option>)}
+            </select>
+          </div>
+          <div><label className="block text-sm text-kustody-muted mb-2">거래일 (Trade Date)</label><input type="date" value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} className="w-full font-mono" /></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">Spot Days <span className="ml-2 text-xs text-kustody-accent">(기본: 2일)</span></label><input type="number" min="0" max="5" value={spotDays} onChange={(e) => setSpotDays(parseInt(e.target.value) || 0)} className="w-full font-mono" /></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">Tenor</label><select value={tenor} onChange={(e) => setTenor(e.target.value)} className="w-full">{TENORS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">Date Rule</label><select value={dateRule} onChange={(e) => setDateRule(e.target.value)} className="w-full">{DATE_RULES.map(rule => <option key={rule.value} value={rule.value}>{rule.label}</option>)}</select></div>
+          <div className="flex items-center justify-between py-3 px-4 bg-kustody-surface rounded-lg">
+            <div><div className="text-sm text-kustody-text">End-of-Month Rule</div><div className="text-xs text-kustody-muted">Spot이 월말이면 만기도 월말</div></div>
+            <button onClick={() => setEomRule(!eomRule)} className={`w-12 h-6 rounded-full transition-colors relative ${eomRule ? 'bg-kustody-accent' : 'bg-kustody-border'}`}><div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${eomRule ? 'left-7' : 'left-1'}`} /></button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 pt-2"><span className="text-xs text-kustody-muted">적용 캘린더:</span>{result.calendars.map(cal => <span key={cal} className="px-2 py-0.5 text-xs font-mono bg-kustody-navy rounded">{cal}</span>)}</div>
+      </div>
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 mb-4"><div className="w-1 h-6 bg-kustody-accent rounded-full" /><h2 className="text-lg font-semibold">결과</h2></div>
+        {!result.isTradeBD && <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-4 py-3 text-yellow-400 text-sm">⚠️ 거래일이 휴일입니다</div>}
+        {eomRule && result.isSpotEOM && tenor !== 'SPOT' && !['O/N','ON','T/N','TN','S/N','SN'].includes(tenor) && !tenor.endsWith('W') && <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-lg px-4 py-3 text-kustody-accent text-sm">📅 EOM Rule 적용됨</div>}
+        <div className="space-y-4">
+          <ResultCard label="거래일" date={result.tradeDate} sublabel="Trade Date" />
+          <ResultCard label="Spot Date" date={result.spotDate} sublabel={`T+${spotDays}`} highlight />
+          <ResultCard label="만기일" date={result.maturityDate} sublabel="Maturity Date" highlight />
+        </div>
+        <div className="grid grid-cols-2 gap-4 pt-4">
+          <div className="bg-kustody-surface rounded-lg p-4 text-center"><div className="text-2xl font-mono font-semibold text-kustody-accent">{result.daysToMaturity}</div><div className="text-xs text-kustody-muted mt-1">Calendar Days</div></div>
+          <div className="bg-kustody-surface rounded-lg p-4 text-center"><div className="text-2xl font-mono font-semibold text-kustody-text">{result.businessDays}</div><div className="text-xs text-kustody-muted mt-1">Business Days</div></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultCard({ label, date, sublabel, highlight }) {
+  return (
+    <div className={`result-card rounded-xl p-5 ${highlight ? 'ring-1 ring-kustody-accent/30' : ''}`}>
+      <div className="flex items-center justify-between">
+        <div><div className="text-sm text-kustody-muted">{label}</div><div className="text-xs text-kustody-muted/60 mt-0.5">{sublabel}</div></div>
+        <div className="text-right"><div className="text-xl font-mono font-semibold text-kustody-text">{formatDate(date)}</div><div className="text-sm text-kustody-muted mt-0.5">{getDayName(date)} ({getDayNameEn(date)})</div></div>
+      </div>
+    </div>
+  );
+}
+
+function HolidaysTab({ holidays, setHolidays }) {
+  const [selectedCountry, setSelectedCountry] = useState('KR');
+  const [newDate, setNewDate] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState('fixed');
+  const currentHolidays = holidays[selectedCountry] || [];
+
+  const handleAdd = () => {
+    if (!newDate || !newName) return;
+    const updated = [...currentHolidays, { date: newDate, name: newName, type: newType }].sort((a, b) => a.date.localeCompare(b.date));
+    setHolidays(prev => ({ ...prev, [selectedCountry]: updated }));
+    setNewDate(''); setNewName(''); setNewType('fixed');
+  };
+
+  const handleDelete = (index) => setHolidays(prev => ({ ...prev, [selectedCountry]: currentHolidays.filter((_, i) => i !== index) }));
+
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify({ year: 2025, country: selectedCountry, holidays: currentHolidays }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${selectedCountry.toLowerCase()}_holidays.json`; a.click();
+  };
+
+  const typeColors = { fixed: 'bg-blue-500', lunar: 'bg-yellow-500', substitute: 'bg-green-500', floating: 'bg-orange-500' };
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-8 animate-fade-in">
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 mb-4"><div className="w-1 h-6 bg-kustody-accent rounded-full" /><h2 className="text-lg font-semibold">휴일 추가</h2></div>
+        <div className="space-y-4">
+          <div><label className="block text-sm text-kustody-muted mb-2">국가</label><select value={selectedCountry} onChange={(e) => setSelectedCountry(e.target.value)} className="w-full"><option value="KR">🇰🇷 한국</option><option value="US">🇺🇸 미국</option></select></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">날짜</label><input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="w-full font-mono" /></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">휴일명</label><input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="예: 광복절" className="w-full" /></div>
+          <div><label className="block text-sm text-kustody-muted mb-2">유형</label><select value={newType} onChange={(e) => setNewType(e.target.value)} className="w-full"><option value="fixed">Fixed</option><option value="lunar">Lunar</option><option value="substitute">Substitute</option><option value="floating">Floating</option></select></div>
+          <button onClick={handleAdd} disabled={!newDate || !newName} className="w-full py-3 bg-kustody-accent text-kustody-dark font-semibold rounded-lg disabled:opacity-50">➕ 휴일 추가</button>
+          <button onClick={handleExport} className="w-full py-3 bg-kustody-navy text-kustody-text rounded-lg">💾 JSON 다운로드</button>
+        </div>
+      </div>
+      <div className="lg:col-span-2">
+        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-semibold">{selectedCountry} 휴일 목록</h2><span className="text-sm text-kustody-muted">{currentHolidays.length}개</span></div>
+        <div className="bg-kustody-surface rounded-xl overflow-hidden max-h-[500px] overflow-y-auto">
+          {currentHolidays.map((h, i) => (
+            <div key={i} className="flex items-center justify-between px-5 py-3 border-b border-kustody-border/50 hover:bg-kustody-navy/30">
+              <div className="flex items-center gap-4"><span className="font-mono text-sm text-kustody-muted w-24">{h.date}</span><span>{h.name}</span></div>
+              <div className="flex items-center gap-3"><span className={`px-2 py-0.5 text-xs rounded-full text-white ${typeColors[h.type]}`}>{h.type}</span><button onClick={() => handleDelete(i)} className="text-kustody-muted hover:text-red-400">🗑️</button></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarTab({ holidays }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [selectedCountries, setSelectedCountries] = useState(['KR', 'US']);
+
+  const holidayMap = useMemo(() => {
+    const map = {};
+    for (const country of selectedCountries) {
+      for (const h of (holidays[country] || [])) { if (!map[h.date]) map[h.date] = []; map[h.date].push({ ...h, country }); }
+    }
+    return map;
+  }, [holidays, selectedCountries]);
+
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(viewYear, viewMonth, 1);
+    const lastDay = new Date(viewYear, viewMonth + 1, 0);
+    const startOffset = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+    const days = [];
+    for (let i = startOffset - 1; i >= 0; i--) { const d = new Date(viewYear, viewMonth, -i); days.push({ date: d, isCurrentMonth: false }); }
+    for (let i = 1; i <= lastDay.getDate(); i++) days.push({ date: new Date(viewYear, viewMonth, i), isCurrentMonth: true });
+    while (days.length < 42) { days.push({ date: new Date(viewYear, viewMonth + 1, days.length - lastDay.getDate() - startOffset + 1), isCurrentMonth: false }); }
+    return days;
+  }, [viewYear, viewMonth]);
+
+  const monthNames = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const todayStr = formatDate(today);
+
+  return (
+    <div className="animate-fade-in">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <button onClick={() => viewMonth === 0 ? (setViewYear(y => y-1), setViewMonth(11)) : setViewMonth(m => m-1)} className="w-10 h-10 rounded-lg bg-kustody-surface hover:bg-kustody-navy flex items-center justify-center">←</button>
+          <div className="text-xl font-semibold min-w-[140px] text-center">{viewYear}년 {monthNames[viewMonth]}</div>
+          <button onClick={() => viewMonth === 11 ? (setViewYear(y => y+1), setViewMonth(0)) : setViewMonth(m => m+1)} className="w-10 h-10 rounded-lg bg-kustody-surface hover:bg-kustody-navy flex items-center justify-center">→</button>
+        </div>
+        <div className="flex gap-2">{['KR','US'].map(c => <button key={c} onClick={() => setSelectedCountries(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])} className={`px-3 py-1.5 text-sm rounded-lg ${selectedCountries.includes(c) ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-surface text-kustody-muted'}`}>{c}</button>)}</div>
+      </div>
+      <div className="bg-kustody-surface rounded-xl p-6">
+        <div className="grid grid-cols-7 gap-2 mb-4">{['월','화','수','목','금','토','일'].map((d,i) => <div key={d} className={`text-center text-sm py-2 ${i >= 5 ? 'text-kustody-muted' : ''}`}>{d}</div>)}</div>
+        <div className="grid grid-cols-7 gap-2">
+          {calendarDays.map((day, i) => {
+            const dateStr = formatDate(day.date);
+            const isWeekend = day.date.getDay() === 0 || day.date.getDay() === 6;
+            const holidayInfo = holidayMap[dateStr];
+            return (
+              <div key={i} title={holidayInfo?.map(h => `${h.country}: ${h.name}`).join('\n')}
+                className={`cal-day relative ${!day.isCurrentMonth ? 'cal-day-other-month' : ''} ${isWeekend && day.isCurrentMonth ? 'cal-day-weekend' : ''} ${holidayInfo ? 'cal-day-holiday' : ''} ${dateStr === todayStr ? 'cal-day-today' : ''}`}>
+                {day.date.getDate()}
+                {holidayInfo && day.isCurrentMonth && <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-red-400" />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfigTab() {
+  const [selectedPair, setSelectedPair] = useState('USDKRW');
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const currencyPairs = ['USDKRW', 'USDJPY', 'EURUSD', 'USDCNH'];
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/config/currencies/${selectedPair}.json`).then(res => res.ok ? res.json() : null).then(data => { setConfig(data); setLoading(false); }).catch(() => setLoading(false));
+  }, [selectedPair]);
+
+  if (loading) return <div className="text-center py-20 text-kustody-muted">로딩 중...</div>;
+  if (!config) return <div className="text-center py-20 text-kustody-muted">Config를 불러올 수 없습니다</div>;
+
+  return (
+    <div className="animate-fade-in">
+      <div className="flex items-center gap-4 mb-8">
+        <span className="text-sm text-kustody-muted">통화쌍:</span>
+        <div className="flex gap-2">{currencyPairs.map(pair => <button key={pair} onClick={() => setSelectedPair(pair)} className={`px-4 py-2 rounded-lg font-mono text-sm ${selectedPair === pair ? 'bg-kustody-accent text-kustody-dark font-semibold' : 'bg-kustody-surface text-kustody-muted hover:bg-kustody-navy'}`}>{pair}</button>)}</div>
+      </div>
+      <div className="grid lg:grid-cols-2 gap-6">
+        <div className="bg-kustody-surface rounded-xl p-6">
+          <h3 className="text-lg font-semibold mb-4">📅 Date Convention</h3>
+          <div className="space-y-2">
+            <ConfigRow label="Spot Days" value={config.dateConvention.spotDays} />
+            <ConfigRow label="Business Day Conv." value={config.dateConvention.businessDayConvention} />
+            <ConfigRow label="EOM Rule" value={config.dateConvention.endOfMonthRule ? 'Yes' : 'No'} />
+            <ConfigRow label="Calendars" value={config.dateConvention.calendars.join(', ')} />
+          </div>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6">
+          <h3 className="text-lg font-semibold mb-4">🔢 Day Count</h3>
+          <div className="space-y-2">
+            <ConfigRow label={`${config.dayCount.base.currency}`} value={`${config.dayCount.base.convention} (${config.dayCount.base.daysPerYear})`} />
+            <ConfigRow label={`${config.dayCount.quote.currency}`} value={`${config.dayCount.quote.convention} (${config.dayCount.quote.daysPerYear})`} />
+          </div>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6">
+          <h3 className="text-lg font-semibold mb-4">⚠️ Risk Parameters</h3>
+          <div className="space-y-2">
+            <ConfigRow label="Line Fee" value={`${(config.riskParameters.lineFee * 100).toFixed(2)}%`} />
+            <ConfigRow label="FNGB Rate" value={`${(config.riskParameters.fngbRate * 100).toFixed(2)}%`} />
+            <ConfigRow label="RWA Multiplier" value={config.riskParameters.rwaMultiplier} />
+          </div>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6">
+          <h3 className="text-lg font-semibold mb-4">💱 Quote Convention</h3>
+          <div className="space-y-2">
+            <ConfigRow label="Spot Decimals" value={config.quoteConvention.spotDecimalPlaces} />
+            <ConfigRow label="Fwd Points Decimals" value={config.quoteConvention.forwardPointsDecimalPlaces} />
+            <ConfigRow label="Rate Decimals" value={config.quoteConvention.rateDecimalPlaces} />
+          </div>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6 lg:col-span-2">
+          <h3 className="text-lg font-semibold mb-4">📊 Cash Instruments</h3>
+          <table className="w-full text-sm"><thead><tr className="border-b border-kustody-border"><th className="text-left py-2 px-3 text-kustody-muted">Tenor</th><th className="text-left py-2 px-3 text-kustody-muted">Base Ticker</th><th className="text-left py-2 px-3 text-kustody-muted">Quote Ticker</th></tr></thead>
+            <tbody>{config.instruments.cash.map((inst, i) => <tr key={i} className="border-b border-kustody-border/30"><td className="py-2 px-3 font-mono">{inst.tenor}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.baseTicker || '-'}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.quoteTicker || '-'}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6 lg:col-span-2">
+          <h3 className="text-lg font-semibold mb-4">🔄 Swap Instruments</h3>
+          <table className="w-full text-sm"><thead><tr className="border-b border-kustody-border"><th className="text-left py-2 px-3 text-kustody-muted">Tenor</th><th className="text-left py-2 px-3 text-kustody-muted">Base Ticker</th><th className="text-left py-2 px-3 text-kustody-muted">Quote Ticker</th></tr></thead>
+            <tbody>{config.instruments.swap.map((inst, i) => <tr key={i} className="border-b border-kustody-border/30"><td className="py-2 px-3 font-mono">{inst.tenor}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.baseTicker || '-'}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.quoteTicker || '-'}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-6 lg:col-span-2">
+          <h3 className="text-lg font-semibold mb-4">💹 FX Swap Instruments</h3>
+          <table className="w-full text-sm"><thead><tr className="border-b border-kustody-border"><th className="text-left py-2 px-3 text-kustody-muted">Tenor</th><th className="text-left py-2 px-3 text-kustody-muted">Ticker</th><th className="text-left py-2 px-3 text-kustody-muted">NDF Ticker</th></tr></thead>
+            <tbody>{config.instruments.fxSwap.map((inst, i) => <tr key={i} className="border-b border-kustody-border/30"><td className="py-2 px-3 font-mono">{inst.tenor}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.ticker}</td><td className="py-2 px-3 font-mono text-xs text-kustody-muted">{inst.ndfTicker || '-'}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfigRow({ label, value }) {
+  return <div className="flex justify-between py-2 border-b border-kustody-border/30"><span className="text-kustody-muted text-sm">{label}</span><span className="font-mono">{value}</span></div>;
+}
+
+// ============================================================
+// Curves Tab with Interpolation - Excel Style
+// ============================================================
+
+function CurvesTab() {
+  const [curveData, setCurveData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedCcy, setSelectedCcy] = useState('USD');
+  const [rebuilding, setRebuilding] = useState(false);
+  
+  // Override values (user input)
+  const [overrides, setOverrides] = useState({});
+  const [bidOverrides, setBidOverrides] = useState({});
+  const [askOverrides, setAskOverrides] = useState({});
+  
+  // Interpolation state
+  const [interpDate, setInterpDate] = useState('2020-04-06'); // Maturity (1M)
+  const [interpStartDate, setInterpStartDate] = useState('2020-03-04'); // Start (Spot)
+  const [interpMethod, setInterpMethod] = useState('swap_point_linear');
+  const [viewMode, setViewMode] = useState('pro'); // 'beginner' or 'pro'
+
+  // ============================================================
+  // USD Bootstrapping: Rate → DF 계산
+  // ============================================================
+  const bootstrapUSD = (curve) => {
+    if (!curve || !curve.tenors) return curve;
+    
+    const dayCount = curve.dayCount || 360;
+    const tenors = [...curve.tenors].sort((a, b) => a.days - b.days);
+    const bootstrapped = [];
+    
+    // 연간 DF 저장 (Swap bootstrapping용)
+    const annualDFs = {};
+    
+    for (let i = 0; i < tenors.length; i++) {
+      const tenor = tenors[i];
+      const days = tenor.days;
+      const yearFrac = days / dayCount;
+      
+      const rate = tenor.rate / 100;
+      let df;
+      
+      if (tenor.type === 'CASH' || Math.abs(days) <= 365) {
+        // Cash: Simple Interest
+        df = 1 / (1 + rate * yearFrac);
+      } else {
+        // Swap: Bootstrapping with annual compounding
+        const years = Math.floor(Math.abs(days) / 365);
+        let couponPV = 0;
+        for (let y = 1; y < years; y++) {
+          if (annualDFs[y]) couponPV += rate * annualDFs[y];
+        }
+        df = (1 - couponPV) / (1 + rate);
+      }
+      
+      // 연간 DF 저장
+      const years = Math.round(Math.abs(days) / 365);
+      if (years >= 1 && Math.abs(Math.abs(days) - years * 365) < 30) {
+        annualDFs[years] = df;
+      }
+      
+      const lnDF = Math.log(df);
+      const zeroRate = Math.abs(yearFrac) > 0 ? ((1/df - 1) / yearFrac) * 100 : tenor.rate;
+      
+      bootstrapped.push({
+        ...tenor,
+        df: df,
+        lnDF: lnDF,
+        zeroRate: zeroRate
+      });
+    }
+    
+    return { ...curve, tenors: bootstrapped, lastBootstrap: new Date().toISOString() };
+  };
+
+  // ============================================================
+  // KRW DF 역산: FX Swap Points + USD DF + Spot → KRW DF
+  // Forward = Spot + SwapPoint
+  // KRW_DF = USD_DF × Spot / Forward
+  // ============================================================
+  const bootstrapKRW = (krwCurve, usdCurve, fxSwapPoints, spot, screenOvr = {}, bidOvr = {}, askOvr = {}) => {
+    if (!krwCurve || !usdCurve || !fxSwapPoints || !spot) return krwCurve;
+    
+    const dayCount = krwCurve.dayCount || 365;
+    const tenors = [...krwCurve.tenors].sort((a, b) => a.days - b.days);
+    const bootstrapped = [];
+    
+    // USD DF 보간 함수
+    const getUsdDF = (targetDays) => {
+      const usdTenors = usdCurve.tenors.filter(t => t.df).sort((a, b) => a.days - b.days);
+      if (usdTenors.length === 0) return 1;
+      
+      // 정확히 일치하는 tenor 찾기
+      const exact = usdTenors.find(t => t.days === targetDays);
+      if (exact) return exact.df;
+      
+      // 범위 밖
+      if (targetDays <= usdTenors[0].days) return usdTenors[0].df;
+      if (targetDays >= usdTenors[usdTenors.length - 1].days) return usdTenors[usdTenors.length - 1].df;
+      
+      // Log-linear 보간
+      let lower = usdTenors[0], upper = usdTenors[1];
+      for (let i = 0; i < usdTenors.length - 1; i++) {
+        if (targetDays >= usdTenors[i].days && targetDays <= usdTenors[i + 1].days) {
+          lower = usdTenors[i];
+          upper = usdTenors[i + 1];
+          break;
+        }
+      }
+      
+      const t = (targetDays - lower.days) / (upper.days - lower.days);
+      const lnDfLower = Math.log(lower.df);
+      const lnDfUpper = Math.log(upper.df);
+      return Math.exp(lnDfLower + (lnDfUpper - lnDfLower) * t);
+    };
+    
+    // FX Swap Point에서 해당 tenor 찾기 (오버라이드 반영)
+    // 오버라이드는 전단위 입력 (예: -100) → 원단위 변환 (예: -1.00)
+    const getSwapPoint = (days, tenorName) => {
+      const sp = fxSwapPoints.find(s => s.days === days);
+      if (!sp) return null;
+      
+      // 오버라이드 적용 (전단위 입력 → 원단위 변환: / 100)
+      const points = screenOvr[tenorName] !== undefined && screenOvr[tenorName] !== '' 
+        ? parseFloat(screenOvr[tenorName]) / 100 
+        : sp.points;
+      const bid = bidOvr[tenorName] !== undefined && bidOvr[tenorName] !== '' 
+        ? parseFloat(bidOvr[tenorName]) / 100 
+        : sp.bid;
+      const ask = askOvr[tenorName] !== undefined && askOvr[tenorName] !== '' 
+        ? parseFloat(askOvr[tenorName]) / 100 
+        : sp.ask;
+      
+      return { ...sp, points, bid, ask };
+    };
+    
+    for (let i = 0; i < tenors.length; i++) {
+      const tenor = tenors[i];
+      const days = tenor.days;
+      const yearFrac = days / dayCount;
+      
+      let dfMid, dfBid, dfAsk;
+      
+      // FX Swap Points에서 역산 (오버라이드 포함)
+      const swapPoint = getSwapPoint(days, tenor.tenor);
+      const usdDF = getUsdDF(days);
+      
+      if (swapPoint && usdDF) {
+        // Forward = Spot + SwapPoint
+        // KRW_DF = USD_DF × Spot / Forward = USD_DF / (1 + SwapPoint/Spot)
+        const forwardMid = spot + (swapPoint.points || 0);
+        const forwardBid = spot + (swapPoint.bid !== null ? swapPoint.bid : swapPoint.points || 0);
+        const forwardAsk = spot + (swapPoint.ask !== null ? swapPoint.ask : swapPoint.points || 0);
+        
+        dfMid = usdDF * spot / forwardMid;
+        dfBid = usdDF * spot / forwardBid;
+        dfAsk = usdDF * spot / forwardAsk;
+      } else if (days < 0) {
+        // O/N 등 Spot 이전 - JSON의 기존 값 사용
+        const rate = tenor.rate / 100;
+        dfMid = 1 / (1 + rate * Math.abs(yearFrac));
+        dfBid = tenor.dfBid || dfMid;
+        dfAsk = tenor.dfAsk || dfMid;
+      } else {
+        // FX Swap Point 없으면 Rate에서 계산
+        const rate = tenor.rate / 100;
+        dfMid = 1 / (1 + rate * yearFrac);
+        dfBid = tenor.dfBid || dfMid;
+        dfAsk = tenor.dfAsk || dfMid;
+      }
+      
+      const lnDF = Math.log(dfMid);
+      const lnDfBid = Math.log(dfBid);
+      const lnDfAsk = Math.log(dfAsk);
+      const zeroRate = Math.abs(yearFrac) > 0 ? ((1/dfMid - 1) / yearFrac) * 100 : tenor.rate;
+      
+      bootstrapped.push({
+        ...tenor,
+        df: dfMid,
+        dfBid: dfBid,
+        dfAsk: dfAsk,
+        lnDF: lnDF,
+        lnDfBid: lnDfBid,
+        lnDfAsk: lnDfAsk,
+        zeroRate: zeroRate
+      });
+    }
+    
+    return { ...krwCurve, tenors: bootstrapped, lastBootstrap: new Date().toISOString() };
+  };
+  
+  // Curve Rebuild 함수 (강제 bootstrap)
+  const rebuildCurves = () => {
+    if (!originalData) return;
+    
+    setRebuilding(true);
+    
+    setTimeout(() => {
+      const newData = JSON.parse(JSON.stringify(originalData));
+      
+      if (newData.curves?.USDKRW) {
+        const spot = newData.spotRates?.USDKRW;
+        const fxSwapPoints = newData.curves.USDKRW.fxSwapPoints;
+        
+        // Rate override 적용
+        ['USD', 'KRW'].forEach(ccy => {
+          if (newData.curves.USDKRW[ccy]?.tenors) {
+            newData.curves.USDKRW[ccy].tenors = newData.curves.USDKRW[ccy].tenors.map(t => {
+              const key = `${ccy}_${t.tenor}`;
+              if (rateOverrides[key] !== undefined && rateOverrides[key] !== '') {
+                return { ...t, rate: parseFloat(rateOverrides[key]) };
+              }
+              return t;
+            });
+          }
+        });
+        
+        // 1. USD Bootstrap 먼저 (Rate → DF)
+        newData.curves.USDKRW.USD = bootstrapUSD(newData.curves.USDKRW.USD);
+        
+        // 2. KRW Bootstrap (FX Swap Points + USD DF → KRW DF, 오버라이드 포함)
+        newData.curves.USDKRW.KRW = bootstrapKRW(
+          newData.curves.USDKRW.KRW,
+          newData.curves.USDKRW.USD,
+          fxSwapPoints,
+          spot,
+          overrides,
+          bidOverrides,
+          askOverrides
+        );
+      }
+      setCurveData(newData);
+      setRebuilding(false);
+    }, 100);
+  };
+
+  // Rate 수정 state
+  const [rateOverrides, setRateOverrides] = useState({});
+  const [originalData, setOriginalData] = useState(null);
+  
+  // Rate 및 FX Swap Points 변경 시 자동 Bootstrap
+  useEffect(() => {
+    if (!originalData) return;
+    
+    // 오버라이드가 하나도 없으면 스킵
+    const hasAnyOverride = 
+      Object.keys(rateOverrides).length > 0 ||
+      Object.keys(overrides).length > 0 ||
+      Object.keys(bidOverrides).length > 0 ||
+      Object.keys(askOverrides).length > 0;
+    
+    if (!hasAnyOverride) return;
+    
+    // Rate override 적용 후 bootstrap
+    const newData = JSON.parse(JSON.stringify(originalData));
+    
+    if (newData.curves?.USDKRW) {
+      const spot = newData.spotRates?.USDKRW;
+      const fxSwapPoints = newData.curves.USDKRW.fxSwapPoints;
+      
+      // Rate override 적용
+      ['USD', 'KRW'].forEach(ccy => {
+        if (newData.curves.USDKRW[ccy]?.tenors) {
+          newData.curves.USDKRW[ccy].tenors = newData.curves.USDKRW[ccy].tenors.map(t => {
+            const key = `${ccy}_${t.tenor}`;
+            if (rateOverrides[key] !== undefined && rateOverrides[key] !== '') {
+              return { ...t, rate: parseFloat(rateOverrides[key]) };
+            }
+            return t;
+          });
+        }
+      });
+      
+      // 1. USD Bootstrap 먼저 (Rate → DF)
+      newData.curves.USDKRW.USD = bootstrapUSD(newData.curves.USDKRW.USD);
+      
+      // 2. KRW Bootstrap (FX Swap Points + USD DF → KRW DF, 오버라이드 포함)
+      newData.curves.USDKRW.KRW = bootstrapKRW(
+        newData.curves.USDKRW.KRW,
+        newData.curves.USDKRW.USD,
+        fxSwapPoints,
+        spot,
+        overrides,
+        bidOverrides,
+        askOverrides
+      );
+      
+      // 3. Forward Spreads에 Near/Far Bid/Ask 정보 추가 (오버라이드 반영)
+      if (newData.forwardSpreads?.USDKRW && fxSwapPoints) {
+        newData.forwardSpreads.USDKRW = newData.forwardSpreads.USDKRW.map(s => {
+          const nearSp = fxSwapPoints.find(sp => sp.tenor === s.nearTenor);
+          const farSp = fxSwapPoints.find(sp => sp.tenor === s.farTenor);
+          
+          // 오버라이드 적용 (전단위 → 원단위)
+          const nearBid = bidOverrides[s.nearTenor] !== undefined && bidOverrides[s.nearTenor] !== ''
+            ? parseFloat(bidOverrides[s.nearTenor]) / 100 : (nearSp?.bid ?? null);
+          const nearAsk = askOverrides[s.nearTenor] !== undefined && askOverrides[s.nearTenor] !== ''
+            ? parseFloat(askOverrides[s.nearTenor]) / 100 : (nearSp?.ask ?? null);
+          const farBid = bidOverrides[s.farTenor] !== undefined && bidOverrides[s.farTenor] !== ''
+            ? parseFloat(bidOverrides[s.farTenor]) / 100 : (farSp?.bid ?? null);
+          const farAsk = askOverrides[s.farTenor] !== undefined && askOverrides[s.farTenor] !== ''
+            ? parseFloat(askOverrides[s.farTenor]) / 100 : (farSp?.ask ?? null);
+          
+          return { ...s, nearBid, nearAsk, farBid, farAsk };
+        });
+      }
+    }
+    
+    setCurveData(newData);
+  }, [rateOverrides, overrides, bidOverrides, askOverrides, originalData]);
+
+  useEffect(() => {
+    fetch('/config/curves/20200302_IW.json')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          setOriginalData(data);
+          
+          // 초기 로드 시에도 Bootstrap 실행 (FX Swap Points 기준 KRW DF 계산)
+          if (data.curves?.USDKRW) {
+            const spot = data.spotRates?.USDKRW;
+            const fxSwapPoints = data.curves.USDKRW.fxSwapPoints;
+            
+            // 1. USD Bootstrap
+            data.curves.USDKRW.USD = bootstrapUSD(data.curves.USDKRW.USD);
+            
+            // 2. KRW Bootstrap (FX Swap Points 기준)
+            data.curves.USDKRW.KRW = bootstrapKRW(
+              data.curves.USDKRW.KRW,
+              data.curves.USDKRW.USD,
+              fxSwapPoints,
+              spot
+            );
+            
+            // 3. Forward Spreads에 Near/Far Bid/Ask 정보 추가 (Tight 계산용)
+            if (data.forwardSpreads?.USDKRW && fxSwapPoints) {
+              data.forwardSpreads.USDKRW = data.forwardSpreads.USDKRW.map(s => {
+                const nearSp = fxSwapPoints.find(sp => sp.tenor === s.nearTenor);
+                const farSp = fxSwapPoints.find(sp => sp.tenor === s.farTenor);
+                return {
+                  ...s,
+                  nearBid: nearSp?.bid ?? null,
+                  nearAsk: nearSp?.ask ?? null,
+                  farBid: farSp?.bid ?? null,
+                  farAsk: farSp?.ask ?? null
+                };
+              });
+            }
+          }
+          
+          setCurveData(data);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  // Swap Point Linear Interpolation
+  const interpolateSwapPointLinear = (days, swapPoints, spotDateStr, targetDateStr) => {
+    if (!swapPoints || swapPoints.length === 0) return null;
+    
+    // Spot 이전 (days < 0): 해당 구간의 T/N, O/N 값 그대로 반환
+    // 표시: Start(입력일) → Maturity(Spot)
+    if (days < 0) {
+      const tn = swapPoints.find(sp => sp.tenor === 'T/N');
+      const on = swapPoints.find(sp => sp.tenor === 'O/N');
+      
+      if (days === -1) {
+        // Tom: T/N 구간 (입력일 → Spot)
+        return {
+          startDate: targetDateStr,
+          maturityDate: spotDateStr,
+          displayDays: 1,
+          tenor: 'T/N',
+          points: tn?.points || 0,
+          bid: tn?.bid || 0,
+          ask: tn?.ask || 0
+        };
+      } else if (days <= -2) {
+        // Today: O/N + T/N 구간
+        // Start(입력일) → Spot, 2일
+        return {
+          startDate: targetDateStr,
+          maturityDate: spotDateStr,
+          displayDays: Math.abs(days),
+          tenor: 'O/N+T/N',
+          points: (on?.points || 0) + (tn?.points || 0),
+          bid: (on?.bid || 0) + (tn?.bid || 0),
+          ask: (on?.ask || 0) + (tn?.ask || 0)
+        };
+      }
+    }
+    
+    // Spot (days = 0)
+    if (days === 0) {
+      return { 
+        startDate: spotDateStr,
+        maturityDate: spotDateStr,
+        displayDays: 0,
+        tenor: 'Spot',
+        points: 0, 
+        bid: 0, 
+        ask: 0 
+      };
+    }
+    
+    // Spot 이후 (days > 0): 1W, 1M, ... 등 Spot 이후 tenor들만 사용
+    // 표시: Start(Spot) → Maturity(입력일)
+    const postSpot = swapPoints.filter(sp => sp.days > 0).sort((a, b) => a.days - b.days);
+    
+    if (postSpot.length === 0) return null;
+    
+    let result;
+    let tenor = '';
+    
+    // 범위 체크
+    if (days <= postSpot[0].days) {
+      // 1W 이전: 0 ~ 1W 사이 비례 계산
+      const t = days / postSpot[0].days;
+      tenor = `<${postSpot[0].tenor}`;
+      result = {
+        points: postSpot[0].points * t,
+        bid: postSpot[0].bid !== null ? postSpot[0].bid * t : null,
+        ask: postSpot[0].ask !== null ? postSpot[0].ask * t : null
+      };
+    } else if (days >= postSpot[postSpot.length - 1].days) {
+      tenor = `>${postSpot[postSpot.length - 1].tenor}`;
+      result = { 
+        points: postSpot[postSpot.length - 1].points, 
+        bid: postSpot[postSpot.length - 1].bid, 
+        ask: postSpot[postSpot.length - 1].ask 
+      };
+    } else {
+      // 보간할 구간 찾기
+      let lower = postSpot[0], upper = postSpot[1];
+      for (let i = 0; i < postSpot.length - 1; i++) {
+        if (days >= postSpot[i].days && days <= postSpot[i + 1].days) {
+          lower = postSpot[i];
+          upper = postSpot[i + 1];
+          break;
+        }
+      }
+      
+      tenor = `${lower.tenor}-${upper.tenor}`;
+      
+      // Linear interpolation
+      const t = (days - lower.days) / (upper.days - lower.days);
+      result = {
+        points: lower.points + (upper.points - lower.points) * t,
+        bid: (lower.bid !== null && upper.bid !== null) ? lower.bid + (upper.bid - lower.bid) * t : null,
+        ask: (lower.ask !== null && upper.ask !== null) ? lower.ask + (upper.ask - lower.ask) * t : null
+      };
+    }
+    
+    return {
+      startDate: spotDateStr,
+      maturityDate: targetDateStr,
+      displayDays: days,
+      tenor: tenor,
+      ...result
+    };
+  };
+
+  // Raw Interpolation (Log-Linear DF)
+  // 저장된 lnDF를 linear interpolation → exp() → DF
+  // Bid/Mid/Ask 커브 각각 보간
+  const interpolateRaw = (days, usdCurve, krwCurve, spot, fxSwapPoints, spotDateStr, targetDateStr) => {
+    if (!usdCurve || !krwCurve || !spot) return null;
+    
+    // Spot 이전 (days < 0): Swap Point Linear와 동일
+    if (days < 0 && fxSwapPoints) {
+      const tn = fxSwapPoints.find(sp => sp.tenor === 'T/N');
+      const on = fxSwapPoints.find(sp => sp.tenor === 'O/N');
+      
+      if (days === -1) {
+        return {
+          startDate: targetDateStr,
+          maturityDate: spotDateStr,
+          displayDays: 1,
+          tenor: 'T/N',
+          usdDF: 1,
+          krwDF: 1,
+          forward: spot + (tn?.points || 0),
+          points: tn?.points || 0,
+          bid: tn?.bid || 0,
+          ask: tn?.ask || 0
+        };
+      } else if (days <= -2) {
+        const totalPoints = (on?.points || 0) + (tn?.points || 0);
+        return {
+          startDate: targetDateStr,
+          maturityDate: spotDateStr,
+          displayDays: Math.abs(days),
+          tenor: 'O/N+T/N',
+          usdDF: 1,
+          krwDF: 1,
+          forward: spot + totalPoints,
+          points: totalPoints,
+          bid: (on?.bid || 0) + (tn?.bid || 0),
+          ask: (on?.ask || 0) + (tn?.ask || 0)
+        };
+      }
+    }
+    
+    // Spot (days = 0)
+    if (days === 0) {
+      return {
+        startDate: spotDateStr,
+        maturityDate: spotDateStr,
+        displayDays: 0,
+        tenor: 'Spot',
+        usdDF: 1,
+        krwDF: 1,
+        forward: spot,
+        points: 0,
+        bid: 0,
+        ask: 0
+      };
+    }
+    
+    // Spot 이후 (days > 0): Log-Linear DF 보간
+    // lnDF 보간 함수 (lnDfType: 'lnDF', 'lnDfBid', 'lnDfAsk')
+    const interpolateLnDF = (curve, targetDays, lnDfType = 'lnDF') => {
+      const sorted = [...curve.tenors].filter(t => t[lnDfType] !== undefined && t.days > 0).sort((a, b) => a.days - b.days);
+      
+      if (sorted.length === 0) return null;
+      
+      // 범위 밖 처리
+      if (targetDays <= sorted[0].days) {
+        // Spot ~ 첫 tenor 사이: 비례 보간
+        const t = targetDays / sorted[0].days;
+        return sorted[0][lnDfType] * t;
+      }
+      if (targetDays >= sorted[sorted.length - 1].days) return sorted[sorted.length - 1][lnDfType];
+      
+      // 보간 구간 찾기
+      let lower = sorted[0], upper = sorted[1];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (targetDays >= sorted[i].days && targetDays <= sorted[i + 1].days) {
+          lower = sorted[i];
+          upper = sorted[i + 1];
+          break;
+        }
+      }
+      
+      // Linear interpolation on ln(DF)
+      const lnDfLower = lower[lnDfType];
+      const lnDfUpper = upper[lnDfType];
+      const t = (targetDays - lower.days) / (upper.days - lower.days);
+      
+      return lnDfLower + (lnDfUpper - lnDfLower) * t;
+    };
+    
+    // USD는 단일 커브 (Bid/Ask 없음)
+    const usdLnDF = interpolateLnDF(usdCurve, days, 'lnDF');
+    const usdDF = usdLnDF !== null ? Math.exp(usdLnDF) : null;
+    
+    // KRW는 Bid/Mid/Ask 각각 보간
+    const krwLnDFMid = interpolateLnDF(krwCurve, days, 'lnDF');
+    const krwLnDFBid = interpolateLnDF(krwCurve, days, 'lnDfBid');
+    const krwLnDFAsk = interpolateLnDF(krwCurve, days, 'lnDfAsk');
+    
+    const krwDFMid = krwLnDFMid !== null ? Math.exp(krwLnDFMid) : null;
+    const krwDFBid = krwLnDFBid !== null ? Math.exp(krwLnDFBid) : null;
+    const krwDFAsk = krwLnDFAsk !== null ? Math.exp(krwLnDFAsk) : null;
+    
+    if (!usdDF || !krwDFMid) return null;
+    
+    // Forward 계산: Forward = Spot × (USD_DF / KRW_DF)
+    const forwardMid = spot * (usdDF / krwDFMid);
+    const swapPointsMid = forwardMid - spot;
+    
+    const forwardBid = krwDFBid ? spot * (usdDF / krwDFBid) : null;
+    const swapPointsBid = forwardBid ? forwardBid - spot : null;
+    
+    const forwardAsk = krwDFAsk ? spot * (usdDF / krwDFAsk) : null;
+    const swapPointsAsk = forwardAsk ? forwardAsk - spot : null;
+    
+    return {
+      startDate: spotDateStr,
+      maturityDate: targetDateStr,
+      displayDays: days,
+      tenor: 'Interpolated',
+      usdDF,
+      krwDF: krwDFMid,
+      krwDFBid,
+      krwDFAsk,
+      forward: forwardMid,
+      points: swapPointsMid,
+      bid: swapPointsBid,
+      ask: swapPointsAsk
+    };
+  };
+
+  // 계산 결과
+  const interpResult = useMemo(() => {
+    try {
+      if (!curveData || !interpDate || !interpStartDate) return null;
+      
+      const usdkrw = curveData.curves?.USDKRW;
+      const spot = curveData.spotRates?.USDKRW;
+      if (!usdkrw || !spot) return null;
+      
+      const spotDate = new Date(usdkrw?.USD?.spotDate || curveData.metadata.referenceDate);
+      const targetDate = new Date(interpDate);
+      const startDate = new Date(interpStartDate);
+      
+      // 날짜 유효성 검사
+      if (isNaN(spotDate.getTime()) || isNaN(targetDate.getTime()) || isNaN(startDate.getTime())) {
+        return null;
+      }
+      
+      const spotDateStr = spotDate.toISOString().split('T')[0];
+      const targetDateStr = targetDate.toISOString().split('T')[0];
+      const startDateStr = startDate.toISOString().split('T')[0];
+      
+      // 오버라이드가 적용된 fxSwapPoints (전단위 입력 → 원단위 변환)
+      const fxSwapPointsWithOverrides = usdkrw?.fxSwapPoints?.map(sp => ({
+        ...sp,
+        points: overrides[sp.tenor] !== undefined && overrides[sp.tenor] !== '' 
+          ? parseFloat(overrides[sp.tenor]) / 100 : sp.points,
+        bid: bidOverrides[sp.tenor] !== undefined && bidOverrides[sp.tenor] !== '' 
+          ? parseFloat(bidOverrides[sp.tenor]) / 100 : sp.bid,
+        ask: askOverrides[sp.tenor] !== undefined && askOverrides[sp.tenor] !== '' 
+          ? parseFloat(askOverrides[sp.tenor]) / 100 : sp.ask
+      }));
+      
+      if (viewMode === 'beginner') {
+        // 초보 모드: Spot 기준으로 Target Date까지 계산
+        const days = Math.round((targetDate - spotDate) / (1000 * 60 * 60 * 24));
+        
+        let result;
+        if (interpMethod === 'swap_point_linear') {
+          result = interpolateSwapPointLinear(days, fxSwapPointsWithOverrides, spotDateStr, targetDateStr);
+        } else {
+          result = interpolateRaw(days, usdkrw?.USD, usdkrw?.KRW, spot, fxSwapPointsWithOverrides, spotDateStr, targetDateStr);
+        }
+        
+        return result ? { ...result, days } : null;
+      } else {
+        // Pro 모드: Start Date ~ Maturity Date 구간 계산
+        const startDays = Math.round((startDate - spotDate) / (1000 * 60 * 60 * 24));
+        const maturityDays = Math.round((targetDate - spotDate) / (1000 * 60 * 60 * 24));
+        const periodDays = maturityDays - startDays;
+        
+        // Start와 Maturity 각각의 Swap Point 계산
+        let startResult, maturityResult;
+        
+        if (interpMethod === 'swap_point_linear') {
+          startResult = interpolateSwapPointLinear(startDays, fxSwapPointsWithOverrides, spotDateStr, startDateStr);
+          maturityResult = interpolateSwapPointLinear(maturityDays, fxSwapPointsWithOverrides, spotDateStr, targetDateStr);
+        } else {
+          startResult = interpolateRaw(startDays, usdkrw?.USD, usdkrw?.KRW, spot, fxSwapPointsWithOverrides, spotDateStr, startDateStr);
+          maturityResult = interpolateRaw(maturityDays, usdkrw?.USD, usdkrw?.KRW, spot, fxSwapPointsWithOverrides, spotDateStr, targetDateStr);
+        }
+        
+        if (!startResult || !maturityResult) return null;
+      
+      // Forward Spread = Maturity - Start
+      const forwardPoints = maturityResult.points - startResult.points;
+      
+      // Conservative (보수적): 양쪽 스프레드 지불 - Roll 관점
+      const conservativeBid = (maturityResult.bid !== null && startResult.ask !== null) 
+        ? maturityResult.bid - startResult.ask  // Taker: Far sell (hit bid), Near buy (lift ask)
+        : null;
+      const conservativeAsk = (maturityResult.ask !== null && startResult.bid !== null)
+        ? maturityResult.ask - startResult.bid  // Taker: Far buy (lift ask), Near sell (hit bid)
+        : null;
+      
+      // Tight (타이트): 같은 방향 매칭 - Market Making 관점
+      const tightBid = (maturityResult.bid !== null && startResult.bid !== null)
+        ? maturityResult.bid - startResult.bid  // 양쪽 Bid 매칭
+        : null;
+      const tightAsk = (maturityResult.ask !== null && startResult.ask !== null)
+        ? maturityResult.ask - startResult.ask  // 양쪽 Ask 매칭
+        : null;
+      
+      return {
+        startDate: startDateStr,
+        maturityDate: targetDateStr,
+        displayDays: periodDays,
+        days: periodDays,
+        tenor: `${startDays === 0 ? 'Spot' : startDays + 'D'} → ${maturityDays}D`,
+        points: forwardPoints,
+        // Conservative (Roll)
+        bid: conservativeBid,
+        ask: conservativeAsk,
+        // Tight (Market Making)
+        tightBid: tightBid,
+        tightAsk: tightAsk,
+        // 추가 정보
+        startDays: startDays,
+        maturityDays: maturityDays,
+        startPoints: startResult.points,
+        maturityPoints: maturityResult.points,
+        startBid: startResult.bid,
+        startAsk: startResult.ask,
+        maturityBid: maturityResult.bid,
+        maturityAsk: maturityResult.ask,
+        usdDF: maturityResult.usdDF,
+        krwDF: maturityResult.krwDF,
+        forward: maturityResult.forward
+      };
+    }
+    } catch (e) {
+      console.warn('Interpolation calculation error:', e);
+      return null;
+    }
+  }, [curveData, interpDate, interpStartDate, interpMethod, viewMode, overrides, bidOverrides, askOverrides]);
+
+  if (loading) return <div className="text-center py-20 text-kustody-muted">로딩 중...</div>;
+  if (!curveData) return <div className="text-center py-20 text-kustody-muted">커브 데이터가 없습니다</div>;
+
+  const usdkrw = curveData.curves?.USDKRW;
+  const spot = curveData.spotRates?.USDKRW;
+
+  return (
+    <div className="animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-semibold">Curve Snapshot</h2>
+          <p className="text-sm text-kustody-muted mt-1">
+            Reference: {curveData.metadata.referenceDate} | By: {curveData.metadata.createdBy}
+            {usdkrw?.USD?.lastBootstrap && <span className="ml-2 text-kustody-accent">| Bootstrapped</span>}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button 
+            onClick={rebuildCurves}
+            disabled={rebuilding}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              rebuilding 
+                ? 'bg-kustody-muted text-kustody-dark cursor-wait' 
+                : 'bg-yellow-500 text-kustody-dark hover:bg-yellow-400'
+            }`}
+          >
+            {rebuilding ? '⏳ Building...' : '🔄 Rebuild Curve'}
+          </button>
+          {['USD','KRW'].map(c => (
+            <button key={c} onClick={() => setSelectedCcy(c)} 
+              className={`px-4 py-2 rounded-lg font-mono text-sm ${selectedCcy === c ? 'bg-kustody-accent text-kustody-dark font-semibold' : 'bg-kustody-surface text-kustody-muted'}`}>
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Spot Rates - 엑셀 스타일 */}
+      <div className="bg-kustody-surface rounded-xl p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold">💱 Spot Rates</h3>
+          <span className="text-xs text-kustody-muted">{curveData.metadata.referenceDate}</span>
+        </div>
+        <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
+          {Object.entries(curveData.spotRates).map(([pair, rate]) => (
+            <div key={pair} className="text-center">
+              <div className="text-xs text-kustody-muted mb-1">{pair}</div>
+              <div className="font-mono font-semibold text-kustody-accent">{rate}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* FX Swap Points - Excel Style - 상단 전체 너비 */}
+        <div className="bg-kustody-surface rounded-xl p-5 lg:col-span-2">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">💹 FX Swap Points</h3>
+            <span className="text-xs text-kustody-muted">USDKRW</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+                  <th className="text-left py-2 px-2 font-medium">Tenor</th>
+                  <th className="text-center py-2 px-2 font-medium">Start</th>
+                  <th className="text-center py-2 px-2 font-medium">Maturity</th>
+                  <th className="text-right py-2 px-2 font-medium">Days</th>
+                  <th className="text-right py-2 px-2 font-medium">Screen</th>
+                  <th className="text-right py-2 px-2 font-medium">Sp/Day</th>
+                  <th className="text-right py-2 px-2 font-medium">Indic_rate</th>
+                  <th className="text-center py-2 px-2 font-medium bg-yellow-500/20">O/R</th>
+                  <th className="text-right py-2 px-2 font-medium">Bid</th>
+                  <th className="text-right py-2 px-2 font-medium">Ask</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usdkrw?.fxSwapPoints.map((p, i) => {
+                  // 표시용 days: Start에서 Maturity까지의 실제 기간
+                  const displayDays = p.start && p.maturity 
+                    ? Math.round((new Date(p.maturity) - new Date(p.start)) / (1000 * 60 * 60 * 24))
+                    : (p.days > 0 ? p.days : 1);
+                  
+                  // 전단위 표시 (× 100) - O/R 우선 적용
+                  const screenPips = overrides[p.tenor] !== undefined && overrides[p.tenor] !== ''
+                    ? parseInt(overrides[p.tenor])
+                    : (p.points !== null ? Math.round(p.points * 100) : null);
+                  const bidPips = bidOverrides[p.tenor] !== undefined && bidOverrides[p.tenor] !== ''
+                    ? parseInt(bidOverrides[p.tenor])
+                    : (p.bid !== null ? Math.round(p.bid * 100) : null);
+                  const askPips = askOverrides[p.tenor] !== undefined && askOverrides[p.tenor] !== ''
+                    ? parseInt(askOverrides[p.tenor])
+                    : (p.ask !== null ? Math.round(p.ask * 100) : null);
+                  
+                  // Sp/Day, indicRate도 오버라이드된 값으로 계산
+                  const effectivePoints = screenPips !== null ? screenPips / 100 : null;
+                  const spPerDay = (displayDays > 0 && screenPips !== null) ? (screenPips / displayDays).toFixed(2) : '-';
+                  const indicRate = (displayDays > 0 && effectivePoints !== null) ? ((effectivePoints / spot) * (365 / displayDays) * 100).toFixed(2) : '-';
+                  
+                  // 오버라이드 여부 표시
+                  const hasOverride = overrides[p.tenor] !== undefined && overrides[p.tenor] !== '';
+                  
+                  return (
+                    <tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                      <td className="py-2 px-2 font-mono font-semibold text-kustody-text">{p.tenor}</td>
+                      <td className="py-2 px-2 text-center font-mono text-xs text-kustody-muted">{p.start || '-'}</td>
+                      <td className="py-2 px-2 text-center font-mono text-xs text-kustody-muted">{p.maturity || '-'}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-muted">{displayDays}</td>
+                      <td className={`py-2 px-2 text-right font-mono ${hasOverride ? 'text-yellow-400' : 'text-kustody-text'}`}>
+                        {screenPips !== null ? screenPips : '-'}
+                      </td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-accent">{spPerDay}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-muted">{indicRate}%</td>
+                      <td className="py-2 px-1 bg-yellow-500/10">
+                        <DeferredInput
+                          placeholder=""
+                          value={overrides[p.tenor] || ''}
+                          onCommit={(val) => setOverrides(prev => ({ ...prev, [p.tenor]: val }))}
+                          className="w-20 px-2 py-1 bg-transparent border border-kustody-border/50 rounded text-center font-mono text-sm text-yellow-400 focus:border-yellow-400 focus:outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-1">
+                        <DeferredInput
+                          placeholder={p.bid !== null ? Math.round(p.bid * 100).toString() : ''}
+                          value={bidOverrides[p.tenor] || ''}
+                          onCommit={(val) => setBidOverrides(prev => ({ ...prev, [p.tenor]: val }))}
+                          className="w-20 px-2 py-1 bg-transparent border border-kustody-border/50 rounded text-right font-mono text-sm text-red-400 focus:border-red-400 focus:outline-none placeholder-red-400/50"
+                        />
+                      </td>
+                      <td className="py-2 px-1">
+                        <DeferredInput
+                          placeholder={p.ask !== null ? Math.round(p.ask * 100).toString() : ''}
+                          value={askOverrides[p.tenor] || ''}
+                          onCommit={(val) => setAskOverrides(prev => ({ ...prev, [p.tenor]: val }))}
+                          className="w-20 px-2 py-1 bg-transparent border border-kustody-border/50 rounded text-right font-mono text-sm text-green-400 focus:border-green-400 focus:outline-none placeholder-green-400/50"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Interpolation Calculator */}
+          <div className="mt-6 pt-4 border-t border-kustody-border">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-kustody-accent">🔢 Point Interpolation</h4>
+              {/* Mode Toggle */}
+              <div className="flex bg-kustody-dark rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('beginner')}
+                  className={`px-3 py-1 text-xs rounded-md transition-all ${
+                    viewMode === 'beginner' 
+                      ? 'bg-kustody-accent text-kustody-dark font-semibold' 
+                      : 'text-kustody-muted hover:text-kustody-text'
+                  }`}
+                >
+                  초보
+                </button>
+                <button
+                  onClick={() => setViewMode('pro')}
+                  className={`px-3 py-1 text-xs rounded-md transition-all ${
+                    viewMode === 'pro' 
+                      ? 'bg-kustody-accent text-kustody-dark font-semibold' 
+                      : 'text-kustody-muted hover:text-kustody-text'
+                  }`}
+                >
+                  Pro
+                </button>
+              </div>
+            </div>
+            <div className={`grid ${viewMode === 'pro' ? 'grid-cols-4' : 'grid-cols-3'} gap-3 mb-3`}>
+              {viewMode === 'pro' && (
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">Start Date</label>
+                  <DeferredInput 
+                    type="date" 
+                    value={interpStartDate} 
+                    onCommit={(val) => setInterpStartDate(val)}
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">
+                  {viewMode === 'beginner' ? '결제일' : 'Maturity Date'}
+                </label>
+                <DeferredInput 
+                  type="date" 
+                  value={interpDate} 
+                  onCommit={(val) => setInterpDate(val)}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">Method</label>
+                <select 
+                  value={interpMethod}
+                  onChange={(e) => setInterpMethod(e.target.value)}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+                >
+                  <option value="swap_point_linear">Swap Point Linear</option>
+                  <option value="raw_interpolation">Raw (Log-Linear DF)</option>
+                </select>
+              </div>
+              {/* Result inline - 전단위 표시 */}
+              {interpResult && !interpResult.error && (
+                <div className="bg-kustody-navy/50 rounded-lg p-2 flex items-center justify-around">
+                  <div className="text-center">
+                    <div className="text-xs text-kustody-muted">Screen</div>
+                    <div className="font-mono text-kustody-accent font-semibold">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-kustody-muted">{interpResult.displayDays}D</div>
+                    <div className="font-mono text-xs text-kustody-muted">{interpResult.displayDays > 0 ? (interpResult.points * 100 / interpResult.displayDays).toFixed(2) : '-'}/d</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Detailed Result - 전단위 표시 */}
+            {interpResult && !interpResult.error && (
+              <div className="bg-kustody-navy/30 rounded-lg p-3">
+                {viewMode === 'beginner' ? (
+                  /* 초보 모드: Start < Maturity, Bid/Ask 반전 (Spot 이전) */
+                  <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                    <div>
+                      <div className="text-xs text-kustody-muted">시작일</div>
+                      <div className="font-mono text-kustody-text text-xs">{interpResult.startDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">결제일</div>
+                      <div className="font-mono text-kustody-text text-xs">{interpResult.maturityDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">기간</div>
+                      <div className="font-mono text-kustody-accent">{interpResult.displayDays}일</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Tenor</div>
+                      <div className="font-mono text-kustody-accent text-xs">{interpResult.tenor || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Mid</div>
+                      <div className="font-mono text-kustody-text">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Bid</div>
+                      {/* Spot 이전: Swap Ask가 Outright Bid가 됨 */}
+                      <div className="font-mono text-red-400">
+                        {interpResult.days < 0 
+                          ? (interpResult.ask !== null ? Math.round(interpResult.ask * 100) : '-')
+                          : (interpResult.bid !== null ? Math.round(interpResult.bid * 100) : '-')}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Ask</div>
+                      {/* Spot 이전: Swap Bid가 Outright Ask가 됨 */}
+                      <div className="font-mono text-green-400">
+                        {interpResult.days < 0 
+                          ? (interpResult.bid !== null ? Math.round(interpResult.bid * 100) : '-')
+                          : (interpResult.ask !== null ? Math.round(interpResult.ask * 100) : '-')}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Pro 모드: Start Date ~ Maturity Date 구간 */
+                  <div>
+                    <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                      <div>
+                        <div className="text-xs text-kustody-muted">Start</div>
+                        <div className="font-mono text-kustody-text text-xs">{interpResult.startDate}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Maturity</div>
+                        <div className="font-mono text-kustody-text text-xs">{interpResult.maturityDate}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Days</div>
+                        <div className="font-mono text-kustody-accent">{interpResult.displayDays}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Mid</div>
+                        <div className="font-mono text-kustody-text">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Bid</div>
+                        <div className="font-mono text-red-400">{interpResult.tightBid !== null ? Math.round(interpResult.tightBid * 100) : '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Ask</div>
+                        <div className="font-mono text-green-400">{interpResult.tightAsk !== null ? Math.round(interpResult.tightAsk * 100) : '-'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-kustody-muted">Spread</div>
+                        <div className="font-mono text-kustody-accent">{interpResult.tightAsk !== null && interpResult.tightBid !== null ? Math.round((interpResult.tightAsk - interpResult.tightBid) * 100) : '-'}</div>
+                      </div>
+                    </div>
+                    
+                    {/* Start/Maturity 상세 - 전단위 */}
+                    <div className="mt-2 pt-2 border-t border-kustody-border/30 grid grid-cols-2 gap-2 text-center text-xs">
+                      <div>
+                        <span className="text-kustody-muted">Start ({interpResult.startDays}D): </span>
+                        <span className="font-mono">{interpResult.startPoints !== null ? Math.round(interpResult.startPoints * 100) : '-'}</span>
+                        <span className="text-red-400/70 ml-1">B:{interpResult.startBid !== null ? Math.round(interpResult.startBid * 100) : '-'}</span>
+                        <span className="text-green-400/70 ml-1">A:{interpResult.startAsk !== null ? Math.round(interpResult.startAsk * 100) : '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-kustody-muted">Maturity ({interpResult.maturityDays}D): </span>
+                        <span className="font-mono">{interpResult.maturityPoints !== null ? Math.round(interpResult.maturityPoints * 100) : '-'}</span>
+                        <span className="text-red-400/70 ml-1">B:{interpResult.maturityBid !== null ? Math.round(interpResult.maturityBid * 100) : '-'}</span>
+                        <span className="text-green-400/70 ml-1">A:{interpResult.maturityAsk !== null ? Math.round(interpResult.maturityAsk * 100) : '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {interpMethod === 'raw_interpolation' && interpResult.usdDF && interpResult.displayDays > 0 && viewMode === 'beginner' && (
+                  <div className="mt-2 pt-2 border-t border-kustody-border/30 grid grid-cols-4 gap-2 text-center text-xs">
+                    <div><span className="text-kustody-muted">USD DF:</span> <span className="font-mono">{interpResult.usdDF.toFixed(6)}</span></div>
+                    <div><span className="text-kustody-muted">KRW DF:</span> <span className="font-mono">{interpResult.krwDF.toFixed(6)}</span></div>
+                    <div><span className="text-kustody-muted">Forward:</span> <span className="font-mono">{interpResult.forward?.toFixed(2)}</span></div>
+                    <div><span className="text-kustody-muted">Indic:</span> <span className="font-mono">{((interpResult.points / spot) * (365 / interpResult.displayDays) * 100).toFixed(2)}%</span></div>
+                  </div>
+                )}
+              </div>
+            )}
+            {interpResult?.error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-400 text-sm">
+                {interpResult.error}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Interest Rate Curve */}
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">📈 {selectedCcy} Curve</h3>
+            <span className="text-xs text-kustody-muted bg-kustody-navy px-2 py-1 rounded">DC: {usdkrw?.[selectedCcy]?.dayCount}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-kustody-muted text-xs">
+                  <th className="text-left py-2 font-medium">Tenor</th>
+                  <th className="text-center py-2 font-medium">Maturity</th>
+                  <th className="text-right py-2 font-medium">Days</th>
+                  <th className="text-right py-2 font-medium">Rate</th>
+                  <th className="text-right py-2 font-medium">DF</th>
+                  <th className="text-right py-2 font-medium">Ln(DF)</th>
+                  <th className="text-right py-2 font-medium">Zero Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usdkrw?.[selectedCcy]?.tenors.map((t, i) => {
+                  const rateKey = `${selectedCcy}_${t.tenor}`;
+                  return (
+                    <tr key={i} className="border-t border-kustody-border/30 hover:bg-kustody-navy/20">
+                      <td className="py-2 font-mono font-semibold text-kustody-text">{t.tenor}</td>
+                      <td className="py-2 text-center font-mono text-xs text-kustody-muted">{t.maturity}</td>
+                      <td className="py-2 text-right text-kustody-muted">{t.days}</td>
+                      <td className="py-1 text-right">
+                        <DeferredInput
+                          value={rateOverrides[rateKey] !== undefined ? rateOverrides[rateKey] : t.rate.toFixed(4)}
+                          onCommit={(val) => setRateOverrides(prev => ({ ...prev, [rateKey]: val }))}
+                          className="w-20 px-2 py-1 bg-kustody-dark border border-kustody-border rounded text-right font-mono text-sm text-kustody-accent focus:border-kustody-accent focus:outline-none"
+                        />
+                        <span className="text-kustody-muted ml-1">%</span>
+                      </td>
+                      <td className="py-2 text-right font-mono text-kustody-text">{t.df?.toFixed(6) || '-'}</td>
+                      <td className="py-2 text-right font-mono text-kustody-muted text-xs">{t.lnDF?.toExponential(5) || '-'}</td>
+                      <td className="py-2 text-right font-mono text-kustody-text">{t.zeroRate?.toFixed(4) || '-'}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Implied Yield - 동적 계산 */}
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <h3 className="font-semibold mb-3">📊 Implied Yield</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-kustody-muted text-xs">
+                  <th className="text-left py-2 font-medium">Tenor</th>
+                  <th className="text-right py-2 font-medium">Days</th>
+                  <th className="text-right py-2 font-medium">USD Rate</th>
+                  <th className="text-right py-2 font-medium text-red-400">Impl Bid</th>
+                  <th className="text-right py-2 font-medium text-kustody-accent">Impl Screen</th>
+                  <th className="text-right py-2 font-medium text-green-400">Impl Ask</th>
+                  <th className="text-right py-2 font-medium text-yellow-400">Spread</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  // KRW tenor들로 implied yield 계산
+                  const usdTenors = usdkrw?.USD?.tenors || [];
+                  const krwTenors = usdkrw?.KRW?.tenors || [];
+                  
+                  const impliedData = [];
+                  krwTenors.forEach(krw => {
+                    if (krw.days <= 0) return; // O/N, T/N, Spot 제외
+                    
+                    // USD에서 같은 days tenor 찾기
+                    let usd = usdTenors.find(u => u.days === krw.days);
+                    if (!usd) {
+                      // 가장 가까운 tenor 찾기
+                      const validUsd = usdTenors.filter(u => u.days > 0);
+                      if (validUsd.length > 0) {
+                        usd = validUsd.reduce((prev, curr) => 
+                          Math.abs(curr.days - krw.days) < Math.abs(prev.days - krw.days) ? curr : prev
+                        );
+                      }
+                    }
+                    
+                    if (usd && krw) {
+                      const days = krw.days;
+                      const dayCount = 365;
+                      
+                      // DF 값들
+                      const usdDF = usd.df;
+                      const krwDFMid = krw.df;
+                      const krwDFBid = krw.dfBid || krw.df;
+                      const krwDFAsk = krw.dfAsk || krw.df;
+                      
+                      // Implied KRW Rate (DF에서 역산)
+                      // KRW DF = 1 / (1 + r × days / dayCount)
+                      // r = (1/DF - 1) × dayCount / days
+                      const impliedMid = (1/krwDFMid - 1) * (dayCount / days) * 100;
+                      const impliedBid = (1/krwDFBid - 1) * (dayCount / days) * 100;
+                      const impliedAsk = (1/krwDFAsk - 1) * (dayCount / days) * 100;
+                      
+                      const usdRate = usd.zeroRate || usd.rate;
+                      
+                      impliedData.push({
+                        tenor: krw.tenor,
+                        days: days,
+                        usdRate: usdRate,
+                        impliedBid: impliedBid,
+                        impliedMid: impliedMid,
+                        impliedAsk: impliedAsk,
+                        spread: impliedMid - usdRate
+                      });
+                    }
+                  });
+                  
+                  return impliedData.map((y, i) => (
+                    <tr key={i} className="border-t border-kustody-border/30 hover:bg-kustody-navy/20">
+                      <td className="py-2 font-mono font-semibold">{y.tenor}</td>
+                      <td className="py-2 text-right text-kustody-muted">{y.days}</td>
+                      <td className="py-2 text-right font-mono">{y.usdRate?.toFixed(4)}%</td>
+                      <td className="py-2 text-right font-mono text-red-400">{y.impliedBid?.toFixed(4)}%</td>
+                      <td className="py-2 text-right font-mono text-kustody-accent">{y.impliedMid?.toFixed(4)}%</td>
+                      <td className="py-2 text-right font-mono text-green-400">{y.impliedAsk?.toFixed(4)}%</td>
+                      <td className="py-2 text-right font-mono text-yellow-400">{y.spread?.toFixed(4)}%</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Forward Spreads */}
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <h3 className="font-semibold mb-3">🔀 Forward Spreads</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-kustody-muted text-xs">
+                <th className="text-left py-2 font-medium">Spread</th>
+                <th className="text-center py-2 font-medium">Near→Far</th>
+                <th className="text-right py-2 font-medium">Bid</th>
+                <th className="text-right py-2 font-medium">Mid</th>
+                <th className="text-right py-2 font-medium">Ask</th>
+                <th className="text-right py-2 font-medium">Spread</th>
+              </tr>
+            </thead>
+            <tbody>
+              {curveData.forwardSpreads?.USDKRW.map((s, i) => {
+                // Tight: Far Bid - Near Bid, Far Ask - Near Ask
+                const bid = (s.farBid !== null && s.nearBid !== null) 
+                  ? s.farBid - s.nearBid : null;
+                const ask = (s.farAsk !== null && s.nearAsk !== null)
+                  ? s.farAsk - s.nearAsk : null;
+                const spread = (ask !== null && bid !== null)
+                  ? ask - bid : null;
+                
+                return (
+                  <tr key={i} className="border-t border-kustody-border/30 hover:bg-kustody-navy/20">
+                    <td className="py-2 font-mono font-semibold text-kustody-accent">{s.spread}</td>
+                    <td className="py-2 text-center text-kustody-muted text-xs">{s.nearTenor}→{s.farTenor}</td>
+                    <td className="py-2 text-right font-mono text-red-400">{bid !== null ? Math.round(bid * 100) : '-'}</td>
+                    <td className="py-2 text-right font-mono">{s.points !== null ? Math.round(s.points * 100) : '-'}</td>
+                    <td className="py-2 text-right font-mono text-green-400">{ask !== null ? Math.round(ask * 100) : '-'}</td>
+                    <td className="py-2 text-right font-mono text-kustody-accent">{spread !== null ? Math.round(spread * 100) : '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Clients Tab ====================
+function ClientsTab({ config, setConfig, saveConfig, exportConfig, importConfig, editingClient, setEditingClient, showClientModal, setShowClientModal, saveClient, deleteClient }) {
+  const tierColors = {
+    1: 'text-yellow-400',
+    2: 'text-kustody-text',
+    3: 'text-orange-400',
+    4: 'text-red-400',
+    5: 'text-red-600'
+  };
+
+  const tierBadges = {
+    1: '⭐',
+    2: '',
+    3: '⚠️',
+    4: '🚨',
+    5: '🚫'
+  };
+
+  const statusColors = {
+    active: 'bg-green-500',
+    pending: 'bg-yellow-500',
+    blocked: 'bg-red-500'
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">👥 Client Management</h2>
+          <p className="text-sm text-kustody-muted mt-1">{config.companyName}</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setEditingClient(null); setShowClientModal(true); }}
+            className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg text-sm font-semibold hover:bg-kustody-accent-dim transition-colors"
+          >
+            + 고객 추가
+          </button>
+          <button
+            onClick={saveConfig}
+            className="px-4 py-2 bg-kustody-navy text-kustody-text rounded-lg text-sm hover:bg-kustody-surface transition-colors"
+          >
+            💾 저장
+          </button>
+          <button
+            onClick={exportConfig}
+            className="px-4 py-2 bg-kustody-navy text-kustody-text rounded-lg text-sm hover:bg-kustody-surface transition-colors"
+          >
+            📤 내보내기
+          </button>
+          <label className="px-4 py-2 bg-kustody-navy text-kustody-text rounded-lg text-sm hover:bg-kustody-surface transition-colors cursor-pointer">
+            📥 가져오기
+            <input type="file" accept=".json" onChange={importConfig} className="hidden" />
+          </label>
+        </div>
+      </div>
+
+      {/* Credit Tier 범례 */}
+      <div className="bg-kustody-surface rounded-xl p-4">
+        <h3 className="font-semibold mb-3">📊 Credit Tier 정의</h3>
+        <div className="grid grid-cols-5 gap-4">
+          {Object.entries(config.creditTiers).map(([tier, info]) => (
+            <div key={tier} className={`p-3 rounded-lg bg-kustody-navy/50 ${tierColors[tier]}`}>
+              <div className="font-semibold">{tierBadges[tier]} Tier {tier}</div>
+              <div className="text-sm">{info.name}</div>
+              <div className="text-xs text-kustody-muted mt-1">
+                {info.pointMargin !== null ? `+${info.pointMargin} pt / +${info.bpMargin} bp` : 'N/A'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Notional Tier 범례 */}
+      <div className="bg-kustody-surface rounded-xl p-4">
+        <h3 className="font-semibold mb-3">💵 Notional Size Tier</h3>
+        <div className="grid grid-cols-3 gap-4">
+          {config.notionalTiers.map((tier, i) => (
+            <div key={i} className="p-3 rounded-lg bg-kustody-navy/50">
+              <div className="font-semibold">{tier.name}</div>
+              <div className="text-xs text-kustody-muted">+{tier.margin} points</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Client List */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <h3 className="font-semibold mb-4">📋 등록된 고객</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+              <th className="text-left py-3 font-medium">Client ID</th>
+              <th className="text-left py-3 font-medium">고객명</th>
+              <th className="text-center py-3 font-medium">Credit Tier</th>
+              <th className="text-center py-3 font-medium">Margin Type</th>
+              <th className="text-center py-3 font-medium">SEAL Status</th>
+              <th className="text-center py-3 font-medium">예외</th>
+              <th className="text-center py-3 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {config.clients.map((client) => (
+              <tr key={client.clientId} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                <td className="py-3 font-mono text-kustody-muted">{client.clientId}</td>
+                <td className="py-3 font-semibold">{client.clientName}</td>
+                <td className="py-3 text-center">
+                  <span className={`font-semibold ${tierColors[client.creditTier]}`}>
+                    {tierBadges[client.creditTier]} {client.creditTier} - {config.creditTiers[client.creditTier]?.name}
+                  </span>
+                </td>
+                <td className="py-3 text-center">
+                  <span className={`px-2 py-1 rounded text-xs ${client.marginType === 'point' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                    {client.marginType === 'point' ? 'Point' : 'BP'}
+                  </span>
+                </td>
+                <td className="py-3 text-center">
+                  <span className="flex items-center justify-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${statusColors[client.sealLayer?.status] || 'bg-gray-500'}`}></span>
+                    <span className="text-xs capitalize">{client.sealLayer?.status || 'unknown'}</span>
+                  </span>
+                </td>
+                <td className="py-3 text-center">
+                  {(client.overrides?.ignoreCredit || client.overrides?.ignoreNotional) ? (
+                    <span className="text-yellow-400" title="예외 적용됨">✓</span>
+                  ) : '-'}
+                </td>
+                <td className="py-3 text-center">
+                  <button
+                    onClick={() => { setEditingClient(client); setShowClientModal(true); }}
+                    className="px-2 py-1 text-xs bg-kustody-navy rounded hover:bg-kustody-surface mr-1"
+                  >
+                    수정
+                  </button>
+                  <button
+                    onClick={() => deleteClient(client.clientId)}
+                    className="px-2 py-1 text-xs bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"
+                  >
+                    삭제
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Client Modal */}
+      {showClientModal && (
+        <ClientModal
+          client={editingClient}
+          config={config}
+          onSave={saveClient}
+          onClose={() => { setShowClientModal(false); setEditingClient(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Client 추가/수정 Modal
+function ClientModal({ client, config, onSave, onClose }) {
+  const [form, setForm] = useState(client || {
+    clientId: '',
+    clientName: '',
+    creditTier: 2,
+    marginType: 'point',
+    overrides: { ignoreCredit: false, ignoreNotional: false, customMargin: null },
+    sealLayer: { status: 'pending', walletAddress: '', lastSync: null, kycStatus: 'pending' }
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!form.clientId || !form.clientName) {
+      alert('Client ID와 고객명을 입력해주세요.');
+      return;
+    }
+    onSave(form);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-kustody-surface rounded-xl p-6 w-full max-w-lg">
+        <h3 className="text-lg font-semibold mb-4">{client ? '고객 수정' : '고객 추가'}</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-kustody-muted mb-1">Client ID</label>
+              <input
+                type="text"
+                value={form.clientId}
+                onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+                disabled={!!client}
+                className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-kustody-muted mb-1">고객명</label>
+              <input
+                type="text"
+                value={form.clientName}
+                onChange={(e) => setForm({ ...form, clientName: e.target.value })}
+                className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-kustody-muted mb-1">Credit Tier</label>
+              <select
+                value={form.creditTier}
+                onChange={(e) => setForm({ ...form, creditTier: parseInt(e.target.value) })}
+                className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+              >
+                {Object.entries(config.creditTiers).map(([tier, info]) => (
+                  <option key={tier} value={tier}>Tier {tier} - {info.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-kustody-muted mb-1">Margin Type</label>
+              <select
+                value={form.marginType}
+                onChange={(e) => setForm({ ...form, marginType: e.target.value })}
+                className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+              >
+                <option value="point">Point (직접 가감)</option>
+                <option value="bp">BP (금리 환산)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-kustody-muted mb-2">SEAL Layer</label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">Status</label>
+                <select
+                  value={form.sealLayer?.status || 'pending'}
+                  onChange={(e) => setForm({ ...form, sealLayer: { ...form.sealLayer, status: e.target.value } })}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+                >
+                  <option value="active">Active</option>
+                  <option value="pending">Pending</option>
+                  <option value="blocked">Blocked</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">Wallet Address</label>
+                <input
+                  type="text"
+                  value={form.sealLayer?.walletAddress || ''}
+                  onChange={(e) => setForm({ ...form, sealLayer: { ...form.sealLayer, walletAddress: e.target.value } })}
+                  placeholder="0x..."
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-kustody-muted mb-2">예외 설정</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.overrides?.ignoreCredit || false}
+                  onChange={(e) => setForm({ ...form, overrides: { ...form.overrides, ignoreCredit: e.target.checked } })}
+                  className="rounded"
+                />
+                Credit 무시
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.overrides?.ignoreNotional || false}
+                  onChange={(e) => setForm({ ...form, overrides: { ...form.overrides, ignoreNotional: e.target.checked } })}
+                  className="rounded"
+                />
+                Notional 무시
+              </label>
+            </div>
+            <div className="mt-2">
+              <label className="block text-xs text-kustody-muted mb-1">Custom Margin (point) - 빈칸이면 Tier 기본값</label>
+              <input
+                type="number"
+                value={form.overrides?.customMargin ?? ''}
+                onChange={(e) => setForm({ ...form, overrides: { ...form.overrides, customMargin: e.target.value === '' ? null : parseFloat(e.target.value) } })}
+                placeholder="미지정"
+                className="w-32 px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-kustody-navy text-kustody-text rounded-lg text-sm hover:bg-kustody-surface"
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg text-sm font-semibold hover:bg-kustody-accent-dim"
+            >
+              저장
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Client Pricing Tab ====================
+function ClientPricingTab({ config, selectedClientId, setSelectedClientId, pricingNotional, setPricingNotional }) {
+  const [curveData, setCurveData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  // Point Interpolation 관련 state
+  const [viewMode, setViewMode] = useState('beginner');
+  const [interpDate, setInterpDate] = useState('2020-04-06');
+  const [interpStartDate, setInterpStartDate] = useState('2020-03-04');
+
+  // Curve 데이터 로드
+  useEffect(() => {
+    fetch('/config/curves/20200302_IW.json')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          // Spot Date 기준으로 기본 날짜 설정
+          const spotDate = data.curves?.USDKRW?.USD?.spotDate;
+          if (spotDate) {
+            setInterpStartDate(spotDate);
+            // 1M 후 날짜
+            const maturity = new Date(spotDate);
+            maturity.setMonth(maturity.getMonth() + 1);
+            setInterpDate(maturity.toISOString().split('T')[0]);
+          }
+          setCurveData(data);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const selectedClient = config.clients.find(c => c.clientId === selectedClientId);
+  const spot = curveData?.spotRates?.USDKRW || 1193.87;
+
+  // Notional Tier 찾기
+  const getNotionalTier = (notional) => {
+    return config.notionalTiers.find(t => 
+      notional >= t.min && (t.max === null || notional < t.max)
+    ) || config.notionalTiers[1];
+  };
+
+  // Margin 계산 (Point 방식) - 전단위로 반환
+  const calculatePointMargin = (client, days) => {
+    if (!client) return { credit: 0, notional: 0, total: 0 };
+    
+    const tier = config.creditTiers[client.creditTier];
+    if (!tier || tier.pointMargin === null) return null; // Blocked
+
+    // Custom Margin 체크
+    if (client.overrides?.customMargin !== null && client.overrides?.customMargin !== undefined) {
+      return { credit: client.overrides.customMargin, notional: 0, total: client.overrides.customMargin, isCustom: true };
+    }
+
+    // Credit Margin
+    let creditMargin = 0;
+    if (!client.overrides?.ignoreCredit) {
+      if (client.marginType === 'point') {
+        creditMargin = tier.pointMargin;
+      } else {
+        // BP → Point 환산: bp × days / 365 × spot / 10000
+        creditMargin = tier.bpMargin * days / 365 * spot / 10000;
+      }
+    }
+
+    // Notional Margin
+    let notionalMargin = 0;
+    if (!client.overrides?.ignoreNotional) {
+      const notionalTier = getNotionalTier(pricingNotional);
+      notionalMargin = notionalTier.margin;
+    }
+
+    return {
+      credit: creditMargin,
+      notional: notionalMargin,
+      total: creditMargin + notionalMargin,
+      isCustom: false
+    };
+  };
+
+  // 고객용 커브 생성 (마진 적용)
+  const getClientSwapPoints = () => {
+    if (!curveData || !selectedClient) return [];
+    const fxSwapPoints = curveData.curves?.USDKRW?.fxSwapPoints || [];
+    
+    return fxSwapPoints.map(p => {
+      const margin = calculatePointMargin(selectedClient, p.days);
+      if (!margin) return { ...p, clientBid: null, clientAsk: null };
+      
+      // 마진은 전단위로 계산됨, 원단위로 변환 필요 (/100)
+      const marginInWon = margin.total / 100;
+      
+      return {
+        ...p,
+        clientBid: p.bid !== null ? p.bid - marginInWon : null,
+        clientAsk: p.ask !== null ? p.ask + marginInWon : null
+      };
+    });
+  };
+
+  // Swap Point Linear Interpolation (고객용 커브 기반)
+  const interpolateClientSwapPoint = (days, swapPoints) => {
+    if (!swapPoints || swapPoints.length === 0) return null;
+    
+    // Spot 이전 처리
+    if (days <= 0) {
+      if (days === 0) {
+        return { points: 0, bid: 0, ask: 0, displayDays: 0 };
+      }
+      const tn = swapPoints.find(p => p.tenor === 'T/N');
+      const on = swapPoints.find(p => p.tenor === 'O/N');
+      if (days === -1 && tn) {
+        return { points: tn.points, bid: tn.clientBid, ask: tn.clientAsk, displayDays: 1, tenor: 'T/N' };
+      }
+      if (days === -2 && on) {
+        return { points: on.points, bid: on.clientBid, ask: on.clientAsk, displayDays: 1, tenor: 'O/N' };
+      }
+      return null;
+    }
+
+    const sorted = swapPoints.filter(p => p.days > 0).sort((a, b) => a.days - b.days);
+    if (sorted.length === 0) return null;
+
+    // 정확히 일치하는 경우
+    const exact = sorted.find(p => p.days === days);
+    if (exact) {
+      return {
+        points: exact.points,
+        bid: exact.clientBid,
+        ask: exact.clientAsk,
+        displayDays: days,
+        tenor: exact.tenor
+      };
+    }
+
+    // 범위 밖
+    if (days < sorted[0].days) {
+      return {
+        points: sorted[0].points * days / sorted[0].days,
+        bid: sorted[0].clientBid !== null ? sorted[0].clientBid * days / sorted[0].days : null,
+        ask: sorted[0].clientAsk !== null ? sorted[0].clientAsk * days / sorted[0].days : null,
+        displayDays: days
+      };
+    }
+    if (days > sorted[sorted.length - 1].days) {
+      const last = sorted[sorted.length - 1];
+      return {
+        points: last.points * days / last.days,
+        bid: last.clientBid !== null ? last.clientBid * days / last.days : null,
+        ask: last.clientAsk !== null ? last.clientAsk * days / last.days : null,
+        displayDays: days
+      };
+    }
+
+    // 선형 보간
+    let lower = sorted[0], upper = sorted[sorted.length - 1];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].days <= days && sorted[i + 1].days >= days) {
+        lower = sorted[i];
+        upper = sorted[i + 1];
+        break;
+      }
+    }
+
+    const ratio = (days - lower.days) / (upper.days - lower.days);
+    const interpPoints = lower.points + (upper.points - lower.points) * ratio;
+    const interpBid = (lower.clientBid !== null && upper.clientBid !== null)
+      ? lower.clientBid + (upper.clientBid - lower.clientBid) * ratio : null;
+    const interpAsk = (lower.clientAsk !== null && upper.clientAsk !== null)
+      ? lower.clientAsk + (upper.clientAsk - lower.clientAsk) * ratio : null;
+
+    return {
+      points: interpPoints,
+      bid: interpBid,
+      ask: interpAsk,
+      displayDays: days,
+      lowerTenor: lower.tenor,
+      upperTenor: upper.tenor
+    };
+  };
+
+  // 보간 결과 계산
+  const clientInterpResult = useMemo(() => {
+    if (!curveData || !interpDate || !selectedClient || selectedClient.creditTier === 5) return null;
+    
+    try {
+      const clientSwapPoints = getClientSwapPoints();
+      const usdkrw = curveData.curves?.USDKRW;
+      const spotDate = new Date(usdkrw?.USD?.spotDate || curveData.metadata.referenceDate);
+      const targetDate = new Date(interpDate);
+      const startDate = new Date(interpStartDate);
+      
+      if (isNaN(spotDate.getTime()) || isNaN(targetDate.getTime()) || isNaN(startDate.getTime())) {
+        return null;
+      }
+
+      if (viewMode === 'beginner') {
+        const days = Math.round((targetDate - spotDate) / (1000 * 60 * 60 * 24));
+        const result = interpolateClientSwapPoint(days, clientSwapPoints);
+        return result ? { ...result, days } : null;
+      } else {
+        // Pro 모드
+        const startDays = Math.round((startDate - spotDate) / (1000 * 60 * 60 * 24));
+        const maturityDays = Math.round((targetDate - spotDate) / (1000 * 60 * 60 * 24));
+        const periodDays = maturityDays - startDays;
+
+        const startResult = interpolateClientSwapPoint(startDays, clientSwapPoints);
+        const maturityResult = interpolateClientSwapPoint(maturityDays, clientSwapPoints);
+
+        if (!startResult || !maturityResult) return null;
+
+        // Forward Spread (Tight 방식)
+        const forwardPoints = maturityResult.points - startResult.points;
+        const tightBid = (maturityResult.bid !== null && startResult.bid !== null)
+          ? maturityResult.bid - startResult.bid : null;
+        const tightAsk = (maturityResult.ask !== null && startResult.ask !== null)
+          ? maturityResult.ask - startResult.ask : null;
+
+        return {
+          startDate: interpStartDate,
+          maturityDate: interpDate,
+          displayDays: periodDays,
+          days: periodDays,
+          tenor: `${startDays === 0 ? 'Spot' : startDays + 'D'} → ${maturityDays}D`,
+          points: forwardPoints,
+          tightBid,
+          tightAsk,
+          startDays,
+          maturityDays,
+          startPoints: startResult.points,
+          maturityPoints: maturityResult.points,
+          startBid: startResult.bid,
+          startAsk: startResult.ask,
+          maturityBid: maturityResult.bid,
+          maturityAsk: maturityResult.ask
+        };
+      }
+    } catch (e) {
+      console.warn('Client interpolation error:', e);
+      return null;
+    }
+  }, [curveData, interpDate, interpStartDate, viewMode, selectedClient, pricingNotional]);
+
+  if (loading) return <div className="text-center py-20 text-kustody-muted">로딩 중...</div>;
+
+  const fxSwapPoints = curveData?.curves?.USDKRW?.fxSwapPoints || [];
+  const clientSwapPoints = getClientSwapPoints();
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">💰 Client Pricing</h2>
+          <p className="text-sm text-kustody-muted mt-1">고객별 마진 적용 가격 산출</p>
+        </div>
+        <div className="text-right text-sm text-kustody-muted">
+          Spot: <span className="font-mono text-kustody-accent">{spot.toFixed(2)}</span>
+        </div>
+      </div>
+
+      {/* 고객 선택 & Notional 입력 */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <div className="grid grid-cols-3 gap-6">
+          <div>
+            <label className="block text-xs text-kustody-muted mb-2">고객 선택</label>
+            <select
+              value={selectedClientId}
+              onChange={(e) => setSelectedClientId(e.target.value)}
+              className="w-full px-4 py-3 bg-kustody-dark border border-kustody-border rounded-lg text-sm"
+            >
+              <option value="">-- 고객 선택 --</option>
+              {config.clients.map(c => (
+                <option key={c.clientId} value={c.clientId}>
+                  {c.clientName} (Tier {c.creditTier})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-kustody-muted mb-2">Notional (USD)</label>
+            <input
+              type="number"
+              value={pricingNotional}
+              onChange={(e) => setPricingNotional(parseFloat(e.target.value) || 0)}
+              className="w-full px-4 py-3 bg-kustody-dark border border-kustody-border rounded-lg text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-kustody-muted mb-2">적용 마진 (1M 기준)</label>
+            <div className="px-4 py-3 bg-kustody-accent/20 border border-kustody-accent/30 rounded-lg text-sm font-mono text-kustody-accent font-semibold">
+              ±{selectedClient ? Math.round(calculatePointMargin(selectedClient, 33)?.total || 0) : 0} pt
+              <span className="text-kustody-muted font-normal ml-2">
+                (Credit: {selectedClient ? Math.round(calculatePointMargin(selectedClient, 33)?.credit || 0) : 0} + 
+                Notional: {getNotionalTier(pricingNotional)?.margin || 0})
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tier 5 Blocked */}
+      {selectedClient && selectedClient.creditTier === 5 && (
+        <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-6 text-center">
+          <div className="text-4xl mb-2">🚫</div>
+          <div className="text-red-400 font-semibold text-lg">거래 불가 (Tier 5 - Blocked)</div>
+          <div className="text-kustody-muted text-sm mt-2">
+            {selectedClient.sealLayer?.reason || '내부 정책에 의해 거래가 제한되었습니다.'}
+          </div>
+        </div>
+      )}
+
+      {/* Tier 4 Warning */}
+      {selectedClient && selectedClient.creditTier === 4 && (
+        <div className="bg-orange-500/20 border border-orange-500/50 rounded-lg p-3 text-orange-400 text-sm">
+          ⚠️ Tier 4 (Discouraged) - 거래 억제 가격이 적용됩니다.
+        </div>
+      )}
+
+      {/* FX Swap Points - 고객용 (마진 적용) */}
+      {selectedClient && selectedClient.creditTier !== 5 && (
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">📊 FX Swap Points - {selectedClient.clientName}</h3>
+            <span className="text-xs bg-kustody-navy px-2 py-1 rounded text-kustody-muted">USDKRW · 전단위</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+                  <th className="text-left py-2 px-2 font-medium">Tenor</th>
+                  <th className="text-center py-2 px-2 font-medium">Start</th>
+                  <th className="text-center py-2 px-2 font-medium">Maturity</th>
+                  <th className="text-right py-2 px-2 font-medium">Days</th>
+                  <th className="text-right py-2 px-2 font-medium">Screen</th>
+                  <th className="text-right py-2 px-2 font-medium">Sp/Day</th>
+                  <th className="text-right py-2 px-2 font-medium">Indic_rate</th>
+                  <th className="text-right py-2 px-2 font-medium text-red-400">Bid</th>
+                  <th className="text-right py-2 px-2 font-medium text-green-400">Ask</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clientSwapPoints.map((p, i) => {
+                  // 표시용 days: Start에서 Maturity까지의 실제 기간
+                  const displayDays = p.start && p.maturity 
+                    ? Math.round((new Date(p.maturity) - new Date(p.start)) / (1000 * 60 * 60 * 24))
+                    : (p.days > 0 ? p.days : 1);
+                  const screenPips = p.points !== null ? Math.round(p.points * 100) : null;
+                  const bidPips = p.clientBid !== null ? Math.round(p.clientBid * 100) : null;
+                  const askPips = p.clientAsk !== null ? Math.round(p.clientAsk * 100) : null;
+                  const spPerDay = (displayDays > 0 && screenPips !== null) ? (screenPips / displayDays).toFixed(2) : '-';
+                  const effectivePoints = p.points;
+                  const indicRate = (displayDays > 0 && effectivePoints !== null) ? ((effectivePoints / spot) * (365 / displayDays) * 100).toFixed(2) : '-';
+
+                  return (
+                    <tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                      <td className="py-2 px-2 font-mono font-semibold text-kustody-text">{p.tenor}</td>
+                      <td className="py-2 px-2 text-center font-mono text-xs text-kustody-muted">{p.start || '-'}</td>
+                      <td className="py-2 px-2 text-center font-mono text-xs text-kustody-muted">{p.maturity || '-'}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-muted">{displayDays}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-text">{screenPips !== null ? screenPips : '-'}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-accent">{spPerDay}</td>
+                      <td className="py-2 px-2 text-right font-mono text-kustody-muted">{indicRate !== '-' ? indicRate + '%' : '-'}</td>
+                      <td className="py-2 px-2 text-right font-mono text-red-400 font-semibold">{bidPips ?? '-'}</td>
+                      <td className="py-2 px-2 text-right font-mono text-green-400 font-semibold">{askPips ?? '-'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Point Interpolation - 고객용 */}
+      {selectedClient && selectedClient.creditTier !== 5 && (
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">🎯 Point Interpolation - {selectedClient.clientName}</h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setViewMode('beginner')}
+                className={`px-3 py-1 text-xs rounded-md transition-all ${
+                  viewMode === 'beginner' 
+                    ? 'bg-kustody-accent text-kustody-dark font-semibold' 
+                    : 'text-kustody-muted hover:text-kustody-text'
+                }`}
+              >
+                초보
+              </button>
+              <button
+                onClick={() => setViewMode('pro')}
+                className={`px-3 py-1 text-xs rounded-md transition-all ${
+                  viewMode === 'pro' 
+                    ? 'bg-kustody-accent text-kustody-dark font-semibold' 
+                    : 'text-kustody-muted hover:text-kustody-text'
+                }`}
+              >
+                Pro
+              </button>
+            </div>
+          </div>
+          
+          <div className={`grid ${viewMode === 'pro' ? 'grid-cols-3' : 'grid-cols-2'} gap-3 mb-3`}>
+            {viewMode === 'pro' && (
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">Start Date</label>
+                <input 
+                  type="date" 
+                  value={interpStartDate} 
+                  onChange={(e) => setInterpStartDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm"
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs text-kustody-muted mb-1">
+                {viewMode === 'beginner' ? '결제일' : 'Maturity Date'}
+              </label>
+              <input 
+                type="date" 
+                value={interpDate} 
+                onChange={(e) => setInterpDate(e.target.value)}
+                className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm"
+              />
+            </div>
+            {/* Result inline */}
+            {clientInterpResult && (
+              <div className="bg-kustody-navy/50 rounded-lg p-2 flex items-center justify-around">
+                <div className="text-center">
+                  <div className="text-xs text-kustody-muted">Screen</div>
+                  <div className="font-mono text-kustody-accent font-semibold">
+                    {clientInterpResult.points !== null ? Math.round(clientInterpResult.points * 100) : '-'}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-kustody-muted">{clientInterpResult.displayDays || clientInterpResult.days}D</div>
+                  <div className="font-mono text-xs text-kustody-muted">
+                    {clientInterpResult.displayDays > 0 
+                      ? (clientInterpResult.points * 100 / clientInterpResult.displayDays).toFixed(2) + '/d'
+                      : '-'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 결과 표시 */}
+          {clientInterpResult && (
+            <div className="bg-kustody-navy/30 rounded-lg p-4">
+              {viewMode === 'beginner' ? (
+                <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                  <div>
+                    <div className="text-xs text-kustody-muted">Spot Date</div>
+                    <div className="font-mono text-kustody-text text-xs">
+                      {curveData?.curves?.USDKRW?.USD?.spotDate}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">결제일</div>
+                    <div className="font-mono text-kustody-text text-xs">{interpDate}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">기간</div>
+                    <div className="font-mono text-kustody-accent">{clientInterpResult.displayDays}일</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">Screen</div>
+                    <div className="font-mono text-kustody-text">
+                      {clientInterpResult.points !== null ? Math.round(clientInterpResult.points * 100) : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">Bid</div>
+                    <div className="font-mono text-red-400 font-semibold">
+                      {clientInterpResult.bid !== null ? Math.round(clientInterpResult.bid * 100) : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">Ask</div>
+                    <div className="font-mono text-green-400 font-semibold">
+                      {clientInterpResult.ask !== null ? Math.round(clientInterpResult.ask * 100) : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-kustody-muted">Spread</div>
+                    <div className="font-mono text-kustody-accent">
+                      {clientInterpResult.bid !== null && clientInterpResult.ask !== null 
+                        ? Math.round((clientInterpResult.ask - clientInterpResult.bid) * 100) : '-'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Pro 모드 */
+                <div>
+                  <div className="grid grid-cols-7 gap-2 text-center text-sm">
+                    <div>
+                      <div className="text-xs text-kustody-muted">Start</div>
+                      <div className="font-mono text-kustody-text text-xs">{clientInterpResult.startDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Maturity</div>
+                      <div className="font-mono text-kustody-text text-xs">{clientInterpResult.maturityDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Days</div>
+                      <div className="font-mono text-kustody-accent">{clientInterpResult.displayDays}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Mid</div>
+                      <div className="font-mono text-kustody-text">
+                        {clientInterpResult.points !== null ? Math.round(clientInterpResult.points * 100) : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Bid</div>
+                      <div className="font-mono text-red-400 font-semibold">
+                        {clientInterpResult.tightBid !== null ? Math.round(clientInterpResult.tightBid * 100) : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Ask</div>
+                      <div className="font-mono text-green-400 font-semibold">
+                        {clientInterpResult.tightAsk !== null ? Math.round(clientInterpResult.tightAsk * 100) : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-kustody-muted">Spread</div>
+                      <div className="font-mono text-kustody-accent">
+                        {clientInterpResult.tightAsk !== null && clientInterpResult.tightBid !== null 
+                          ? Math.round((clientInterpResult.tightAsk - clientInterpResult.tightBid) * 100) : '-'}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Start/Maturity 상세 */}
+                  <div className="mt-2 pt-2 border-t border-kustody-border/30 grid grid-cols-2 gap-2 text-center text-xs">
+                    <div>
+                      <span className="text-kustody-muted">Start ({clientInterpResult.startDays}D): </span>
+                      <span className="font-mono">{clientInterpResult.startPoints !== null ? Math.round(clientInterpResult.startPoints * 100) : '-'}</span>
+                      <span className="text-red-400/70 ml-1">B:{clientInterpResult.startBid !== null ? Math.round(clientInterpResult.startBid * 100) : '-'}</span>
+                      <span className="text-green-400/70 ml-1">A:{clientInterpResult.startAsk !== null ? Math.round(clientInterpResult.startAsk * 100) : '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-kustody-muted">Maturity ({clientInterpResult.maturityDays}D): </span>
+                      <span className="font-mono">{clientInterpResult.maturityPoints !== null ? Math.round(clientInterpResult.maturityPoints * 100) : '-'}</span>
+                      <span className="text-red-400/70 ml-1">B:{clientInterpResult.maturityBid !== null ? Math.round(clientInterpResult.maturityBid * 100) : '-'}</span>
+                      <span className="text-green-400/70 ml-1">A:{clientInterpResult.maturityAsk !== null ? Math.round(clientInterpResult.maturityAsk * 100) : '-'}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!selectedClient && (
+        <div className="bg-kustody-surface rounded-xl p-10 text-center text-kustody-muted">
+          👆 고객을 선택해주세요
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== Spread Settings Section ====================
+function SpreadSettingsSection() {
+  const TENOR_LIST = ['ON', 'TN', '1W', '1M', '2M', '3M', '6M', '1Y', '2Y'];
+  
+  const [mode, setMode] = useState('uniform'); // 'uniform' or 'byTenor'
+  const [uniformBp, setUniformBp] = useState(5);
+  const [tenorBp, setTenorBp] = useState({
+    'ON': 20, 'TN': 15, '1W': 10, '1M': 5, '2M': 5, '3M': 5, '6M': 5, '1Y': 5, '2Y': 5
+  });
+  const [minimumPips, setMinimumPips] = useState(1);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    // localStorage에서 설정 로드
+    const savedSettings = localStorage.getItem('stablefx_spread_settings');
+    if (savedSettings) {
+      try {
+        const settings = JSON.parse(savedSettings);
+        setMode(settings.mode || 'uniform');
+        setUniformBp(settings.uniformBp || 5);
+        setTenorBp(settings.tenorBp || tenorBp);
+        setMinimumPips(settings.minimumPips || 1);
+      } catch {}
+    } else {
+      // 레거시 호환: 기존 단일 값이 있으면 가져오기
+      const legacySpread = localStorage.getItem('stablefx_spread_bp');
+      if (legacySpread) {
+        setUniformBp(Number(legacySpread));
+      }
+    }
+  }, []);
+
+  const handleSave = () => {
+    const settings = { mode, uniformBp, tenorBp, minimumPips };
+    localStorage.setItem('stablefx_spread_settings', JSON.stringify(settings));
+    
+    // 레거시 호환용
+    localStorage.setItem('stablefx_spread_bp', String(uniformBp));
+    
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    
+    // 다른 탭에도 알림 (Landing 페이지)
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'stablefx_spread_settings',
+      newValue: JSON.stringify(settings),
+    }));
+  };
+
+  const handleTenorBpChange = (tenor, value) => {
+    setTenorBp(prev => ({ ...prev, [tenor]: Number(value) }));
+  };
+
+  return (
+    <div className="bg-kustody-surface rounded-xl p-5">
+      <h3 className="font-semibold mb-4">📊 Bid/Ask Spread 설정 (Landing 페이지)</h3>
+      <p className="text-sm text-kustody-muted mb-4">
+        Landing 페이지의 스왑포인트 조회에서 보여주는 Bid/Ask 추정 범위를 설정합니다.
+      </p>
+      
+      {/* 모드 선택 */}
+      <div className="mb-6">
+        <label className="block text-sm text-kustody-muted mb-2">스프레드 적용 방식</label>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="spreadMode"
+              checked={mode === 'uniform'}
+              onChange={() => setMode('uniform')}
+              className="accent-kustody-accent"
+            />
+            <span className="text-sm">일괄 적용</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="spreadMode"
+              checked={mode === 'byTenor'}
+              onChange={() => setMode('byTenor')}
+              className="accent-kustody-accent"
+            />
+            <span className="text-sm">테너별 설정</span>
+          </label>
+        </div>
+      </div>
+
+      {/* 일괄 적용 */}
+      {mode === 'uniform' && (
+        <div className="mb-6 p-4 bg-kustody-navy/30 rounded-lg">
+          <div className="flex items-center gap-4">
+            <label className="text-sm text-kustody-muted">일괄 Spread:</label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={uniformBp}
+              onChange={(e) => setUniformBp(Number(e.target.value))}
+              className="w-20 px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono text-center"
+            />
+            <span className="text-sm text-kustody-muted">bp (연율 기준)</span>
+          </div>
+        </div>
+      )}
+
+      {/* 테너별 설정 */}
+      {mode === 'byTenor' && (
+        <div className="mb-6 p-4 bg-kustody-navy/30 rounded-lg">
+          <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+            {TENOR_LIST.map(tenor => (
+              <div key={tenor} className="flex items-center gap-2">
+                <label className="text-xs text-kustody-muted w-8">{tenor}</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={tenorBp[tenor]}
+                  onChange={(e) => handleTenorBpChange(tenor, e.target.value)}
+                  className="w-16 px-2 py-1 bg-kustody-dark border border-kustody-border rounded text-xs font-mono text-center"
+                />
+                <span className="text-xs text-kustody-muted">bp</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Minimum Spread */}
+      <div className="mb-6 p-4 bg-kustody-navy/30 rounded-lg">
+        <div className="flex items-center gap-4">
+          <label className="text-sm text-kustody-muted">Minimum Spread:</label>
+          <input
+            type="number"
+            min="0"
+            max="10"
+            step="0.5"
+            value={minimumPips}
+            onChange={(e) => setMinimumPips(Number(e.target.value))}
+            className="w-20 px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono text-center"
+          />
+          <span className="text-sm text-kustody-muted">전단위 (pips)</span>
+        </div>
+        <p className="text-xs text-kustody-muted mt-2">
+          계산된 스프레드가 이 값보다 작으면 최소값이 적용됩니다.
+        </p>
+      </div>
+
+      {/* 저장 버튼 */}
+      <div className="flex items-center gap-4 mb-6">
+        <button
+          onClick={handleSave}
+          className="px-6 py-2 bg-kustody-accent text-kustody-dark rounded font-semibold"
+        >
+          {saved ? '✓ 저장됨' : '저장'}
+        </button>
+        <span className="text-xs text-kustody-muted">
+          저장 시 Landing 페이지에 즉시 반영됩니다.
+        </span>
+      </div>
+      
+      {/* 예시 */}
+      <div className="p-3 bg-kustody-dark/50 rounded-lg">
+        <p className="text-xs text-kustody-muted">
+          <strong>적용 예시:</strong><br/>
+          • O/N (1일), {mode === 'uniform' ? uniformBp : tenorBp['ON']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['ON']) / 10000 * 1193.85 * 1 / 360 * 100).toFixed(2)}전단위 → <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span><br/>
+          • 1M (33일), {mode === 'uniform' ? uniformBp : tenorBp['1M']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1193.85 * 33 / 360 * 100).toFixed(2)}전단위 → {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1193.85 * 33 / 360 * 100) < minimumPips ? <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span> : '그대로 적용'}<br/>
+          • 1Y (365일), {mode === 'uniform' ? uniformBp : tenorBp['1Y']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1Y']) / 10000 * 1193.85 * 365 / 360 * 100).toFixed(2)}전단위 → 그대로 적용
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ==================== User Feedback Section ====================
+function UserFeedbackSection() {
+  const [feedbacks, setFeedbacks] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+
+  useEffect(() => {
+    const surveys = JSON.parse(localStorage.getItem('stablefx_surveys') || '[]');
+    setFeedbacks(surveys.reverse());
+  }, []);
+
+  const JOB_LABELS = {
+    cfo: 'CFO/경영진', treasury: '자금/재무', accounting: '회계/경리',
+    trader: '트레이더/딜러', risk: '리스크 관리', backoffice: '백오피스/결제',
+    it: 'IT/개발', other: '기타'
+  };
+
+  const BANK_LABELS = {
+    kb: 'KB국민', shinhan: '신한', woori: '우리', hana: '하나',
+    nh: 'NH농협', ibk: 'IBK기업', sc: 'SC제일', citi: '씨티',
+    bnk: 'BNK', dgb: 'DGB대구', foreign: '외국계', other: '기타'
+  };
+
+  const PAIN_LABELS = {
+    compare: '은행별 비교 어려움', timing: '거래 타이밍', excel: '엑셀 관리',
+    report: '보고서 작성', hedge: '헤지 전략', settlement: '결제 일정'
+  };
+
+  const FEATURE_LABELS = {
+    multi_bank_compare: '은행 환율 비교', realtime_pricing: '실시간 알림',
+    cash_schedule: '자금 일정', hedge_dashboard: '헤지 대시보드',
+    auto_report: '자동 리포팅', approval_workflow: '승인 워크플로우',
+    trader_limit: '담당자 한도', audit_trail: '거래 추적', api_erp: 'ERP 연동'
+  };
+
+  const clearFeedbacks = () => {
+    if (confirm('모든 피드백을 삭제하시겠습니까?')) {
+      localStorage.removeItem('stablefx_surveys');
+      setFeedbacks([]);
+    }
+  };
+
+  // 통계 집계
+  const bankCounts = feedbacks.reduce((acc, fb) => {
+    fb.banks?.forEach(b => { acc[b] = (acc[b] || 0) + 1; });
+    return acc;
+  }, {});
+
+  const painCounts = feedbacks.reduce((acc, fb) => {
+    fb.painPoints?.forEach(p => { acc[p] = (acc[p] || 0) + 1; });
+    return acc;
+  }, {});
+
+  const featureCounts = feedbacks.reduce((acc, fb) => {
+    fb.features?.forEach(f => { acc[f] = (acc[f] || 0) + 1; });
+    return acc;
+  }, {});
+
+  const sortedBanks = Object.entries(bankCounts).sort((a, b) => b[1] - a[1]);
+  const sortedPains = Object.entries(painCounts).sort((a, b) => b[1] - a[1]);
+  const sortedFeatures = Object.entries(featureCounts).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="bg-kustody-surface rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">💬 User Feedback ({feedbacks.length}건)</h3>
+        {feedbacks.length > 0 && (
+          <button onClick={clearFeedbacks} className="text-xs text-red-400 hover:text-red-300">전체 삭제</button>
+        )}
+      </div>
+
+      {feedbacks.length === 0 ? (
+        <div className="text-center text-kustody-muted py-8">
+          아직 수집된 피드백이 없습니다.<br />
+          <span className="text-xs">랜딩 페이지에서 설문을 진행하면 여기에 표시됩니다.</span>
+        </div>
+      ) : (
+        <>
+          {/* 3가지 통계 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* 주거래 은행 */}
+            <div className="p-4 bg-kustody-navy/30 rounded-lg">
+              <h4 className="text-xs font-semibold mb-3 text-kustody-accent">🏦 주거래 은행</h4>
+              <div className="space-y-1">
+                {sortedBanks.slice(0, 5).map(([bank, count]) => (
+                  <div key={bank} className="flex justify-between text-xs">
+                    <span className="text-kustody-muted">{BANK_LABELS[bank] || bank}</span>
+                    <span className="font-mono">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Pain Points */}
+            <div className="p-4 bg-kustody-navy/30 rounded-lg">
+              <h4 className="text-xs font-semibold mb-3 text-red-400">😤 Pain Points</h4>
+              <div className="space-y-1">
+                {sortedPains.slice(0, 5).map(([pain, count]) => (
+                  <div key={pain} className="flex justify-between text-xs">
+                    <span className="text-kustody-muted">{PAIN_LABELS[pain] || pain}</span>
+                    <span className="font-mono">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 관심 기능 */}
+            <div className="p-4 bg-kustody-navy/30 rounded-lg">
+              <h4 className="text-xs font-semibold mb-3 text-green-400">⭐ 관심 기능</h4>
+              <div className="space-y-1">
+                {sortedFeatures.slice(0, 5).map(([feature, count]) => (
+                  <div key={feature} className="flex justify-between text-xs">
+                    <span className="text-kustody-muted">{FEATURE_LABELS[feature] || feature}</span>
+                    <span className="font-mono">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 개별 피드백 목록 */}
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {feedbacks.map((fb, idx) => {
+              const roleIcons = { cfo: '👔', treasury: '💰', accounting: '📊', trader: '📈', risk: '🛡️', backoffice: '📋', it: '💻', other: '👤' };
+              return (
+              <div key={idx} className="border border-kustody-border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpanded(expanded === idx ? null : idx)}
+                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-kustody-navy/20 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">{roleIcons[fb.role] || '👤'}</span>
+                    <div>
+                      <div className="text-sm font-medium">
+                        {fb.company ? `${fb.company} · ` : ''}{JOB_LABELS[fb.role] || fb.role}
+                      </div>
+                      <div className="text-xs text-kustody-muted">{new Date(fb.timestamp).toLocaleString('ko-KR')}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {fb.banks?.length > 0 && <span className="text-xs text-blue-400">{fb.banks.length}개 은행</span>}
+                    <span className="text-xs text-kustody-accent">{fb.features?.length || 0}개 기능</span>
+                    <span className="text-kustody-muted">{expanded === idx ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+                {expanded === idx && (
+                  <div className="px-4 py-3 border-t border-kustody-border bg-kustody-navy/20 space-y-3">
+                    {/* 거래 은행 */}
+                    {fb.banks?.length > 0 && (
+                      <div>
+                        <span className="text-xs text-kustody-muted">거래 은행 ({fb.bankCount}):</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {fb.banks.map(b => (
+                            <span key={b} className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
+                              {BANK_LABELS[b] || b}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Pain Points */}
+                    {fb.painPoints?.length > 0 && (
+                      <div>
+                        <span className="text-xs text-kustody-muted">불편한 점:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {fb.painPoints.map(p => (
+                            <span key={p} className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">
+                              {PAIN_LABELS[p] || p}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* 관심 기능 */}
+                    {fb.features?.length > 0 && (
+                      <div>
+                        <span className="text-xs text-kustody-muted">관심 기능:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {fb.features.map(f => (
+                            <span key={f} className="px-2 py-0.5 bg-kustody-accent/20 text-kustody-accent text-xs rounded">
+                              {FEATURE_LABELS[f] || f}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* 추가 의견 */}
+                    {fb.feedback && (
+                      <div>
+                        <span className="text-xs text-kustody-muted">추가 의견:</span>
+                        <p className="text-sm mt-1 p-2 bg-kustody-dark rounded">{fb.feedback}</p>
+                      </div>
+                    )}
+                    {/* 연락처 */}
+                    {fb.email && (
+                      <div className="text-xs">
+                        <span className="text-kustody-muted">이메일:</span> 
+                        <span className="font-mono ml-1">{fb.email}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );})}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ==================== Usage Analytics Section ====================
+function UsageAnalyticsSection() {
+  const [usageLogs, setUsageLogs] = useState([]);
+  const [dateRange, setDateRange] = useState('7d'); // 7d, 30d, all
+
+  useEffect(() => {
+    const logs = JSON.parse(localStorage.getItem('stablefx_usage') || '[]');
+    setUsageLogs(logs);
+  }, []);
+
+  const clearLogs = () => {
+    if (confirm('모든 사용 로그를 삭제하시겠습니까?')) {
+      localStorage.removeItem('stablefx_usage');
+      setUsageLogs([]);
+    }
+  };
+
+  // 날짜 필터링
+  const getFilteredLogs = () => {
+    const now = new Date();
+    let cutoff = new Date(0);
+    if (dateRange === '7d') cutoff = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    else if (dateRange === '30d') cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    
+    return usageLogs.filter(log => new Date(log.timestamp) >= cutoff);
+  };
+
+  const filteredLogs = getFilteredLogs();
+
+  // 일별 통계
+  const dailyStats = filteredLogs.reduce((acc, log) => {
+    const date = log.timestamp.split('T')[0];
+    if (!acc[date]) acc[date] = { date_calc: 0, swap_points_load: 0, swap_points_interp: 0 };
+    acc[date][log.type] = (acc[date][log.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  const sortedDays = Object.keys(dailyStats).sort().reverse();
+
+  // 전체 통계
+  const totalStats = filteredLogs.reduce((acc, log) => {
+    acc[log.type] = (acc[log.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  // 테너별 통계 (date_calc)
+  const tenorStats = filteredLogs
+    .filter(l => l.type === 'date_calc')
+    .reduce((acc, log) => {
+      const tenor = log.data?.tenor || 'unknown';
+      acc[tenor] = (acc[tenor] || 0) + 1;
+      return acc;
+    }, {});
+
+  // 통화쌍별 통계
+  const currencyStats = filteredLogs
+    .filter(l => l.type === 'date_calc')
+    .reduce((acc, log) => {
+      const ccy = log.data?.currency || 'unknown';
+      acc[ccy] = (acc[ccy] || 0) + 1;
+      return acc;
+    }, {});
+
+  const totalCount = filteredLogs.length;
+  const avgPerDay = sortedDays.length > 0 ? (totalCount / sortedDays.length).toFixed(1) : 0;
+
+  return (
+    <div className="bg-kustody-surface rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold">📊 Usage Analytics</h3>
+        <div className="flex items-center gap-2">
+          <select
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value)}
+            className="px-3 py-1 bg-kustody-dark border border-kustody-border rounded text-sm"
+          >
+            <option value="7d">최근 7일</option>
+            <option value="30d">최근 30일</option>
+            <option value="all">전체</option>
+          </select>
+          {usageLogs.length > 0 && (
+            <button onClick={clearLogs} className="text-xs text-red-400 hover:text-red-300">전체 삭제</button>
+          )}
+        </div>
+      </div>
+
+      {filteredLogs.length === 0 ? (
+        <div className="text-center text-kustody-muted py-8">
+          아직 수집된 사용 로그가 없습니다.<br />
+          <span className="text-xs">랜딩 페이지에서 조회 시 여기에 기록됩니다.</span>
+        </div>
+      ) : (
+        <>
+          {/* 요약 카드 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-kustody-navy/30 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-kustody-accent">{totalCount}</div>
+              <div className="text-xs text-kustody-muted mt-1">총 조회수</div>
+            </div>
+            <div className="bg-kustody-navy/30 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-kustody-text">{avgPerDay}</div>
+              <div className="text-xs text-kustody-muted mt-1">일평균</div>
+            </div>
+            <div className="bg-kustody-navy/30 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-blue-400">{totalStats.date_calc || 0}</div>
+              <div className="text-xs text-kustody-muted mt-1">날짜 계산</div>
+            </div>
+            <div className="bg-kustody-navy/30 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-green-400">{(totalStats.swap_points_load || 0) + (totalStats.swap_points_interp || 0)}</div>
+              <div className="text-xs text-kustody-muted mt-1">스왑포인트</div>
+            </div>
+          </div>
+
+          {/* 테너/통화 분포 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="bg-kustody-navy/30 rounded-lg p-4">
+              <h4 className="text-sm font-semibold mb-3">📈 테너별 조회</h4>
+              <div className="space-y-2">
+                {Object.entries(tenorStats).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([tenor, count]) => (
+                  <div key={tenor} className="flex items-center gap-2">
+                    <span className="text-xs font-mono w-12">{tenor}</span>
+                    <div className="flex-1 h-4 bg-kustody-dark rounded overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500/60"
+                        style={{ width: `${(count / (totalStats.date_calc || 1)) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono w-8 text-right">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-kustody-navy/30 rounded-lg p-4">
+              <h4 className="text-sm font-semibold mb-3">💱 통화쌍별 조회</h4>
+              <div className="space-y-2">
+                {Object.entries(currencyStats).sort((a, b) => b[1] - a[1]).map(([ccy, count]) => (
+                  <div key={ccy} className="flex items-center gap-2">
+                    <span className="text-xs font-mono w-16">{ccy}</span>
+                    <div className="flex-1 h-4 bg-kustody-dark rounded overflow-hidden">
+                      <div 
+                        className="h-full bg-green-500/60"
+                        style={{ width: `${(count / (totalStats.date_calc || 1)) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono w-8 text-right">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 일별 추이 */}
+          <div className="bg-kustody-navy/30 rounded-lg p-4">
+            <h4 className="text-sm font-semibold mb-3">📅 일별 추이</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-kustody-muted border-b border-kustody-border">
+                    <th className="text-left py-2">날짜</th>
+                    <th className="text-right py-2">날짜계산</th>
+                    <th className="text-right py-2">스왑조회</th>
+                    <th className="text-right py-2">스왑보간</th>
+                    <th className="text-right py-2">합계</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedDays.slice(0, 14).map(date => {
+                    const stats = dailyStats[date];
+                    const total = (stats.date_calc || 0) + (stats.swap_points_load || 0) + (stats.swap_points_interp || 0);
+                    return (
+                      <tr key={date} className="border-b border-kustody-border/30">
+                        <td className="py-2 font-mono">{date}</td>
+                        <td className="py-2 text-right text-blue-400">{stats.date_calc || 0}</td>
+                        <td className="py-2 text-right text-green-400">{stats.swap_points_load || 0}</td>
+                        <td className="py-2 text-right text-yellow-400">{stats.swap_points_interp || 0}</td>
+                        <td className="py-2 text-right font-semibold">{total}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ==================== Settings Tab ====================
+function SettingsTab({ config, setConfig, saveConfig, bankCodes, selectedClientId, setSelectedClientId }) {
+  const [viewMode, setViewMode] = useState('master'); // 'master' or 'client'
+  const [newCP, setNewCP] = useState({ cpId: '', bankCode: '004', name: '', accounts: { USD: '', KRW: '' } });
+  const [newUser, setNewUser] = useState({ userId: '', name: '', role: 'trader' });
+  const [newClientBank, setNewClientBank] = useState({ bankCode: '004', bankName: '', usdAccount: '', krwAccount: '' });
+  const [newClientTrader, setNewClientTrader] = useState({ name: '', role: 'trader', phone: '', email: '' });
+
+  const selectedClient = config.clients?.find(c => c.clientId === selectedClientId);
+
+  // Master용 함수들
+  const addCounterParty = () => {
+    if (!newCP.cpId || !newCP.name) return alert('필수 정보를 입력해주세요.');
+    setConfig(prev => ({ ...prev, counterParties: [...(prev.counterParties || []), newCP] }));
+    setNewCP({ cpId: '', bankCode: '004', name: '', accounts: { USD: '', KRW: '' } });
+  };
+  const deleteCP = (cpId) => setConfig(prev => ({ ...prev, counterParties: prev.counterParties.filter(cp => cp.cpId !== cpId) }));
+
+  const addUser = () => {
+    if (!newUser.userId || !newUser.name) return alert('필수 정보를 입력해주세요.');
+    setConfig(prev => ({ ...prev, users: [...(prev.users || []), newUser] }));
+    setNewUser({ userId: '', name: '', role: 'trader' });
+  };
+  const deleteUser = (userId) => setConfig(prev => ({ ...prev, users: prev.users.filter(u => u.userId !== userId) }));
+
+  // Client용 함수들
+  const addClientBank = () => {
+    if (!selectedClientId || !newClientBank.usdAccount) return alert('계좌번호를 입력해주세요.');
+    const bank = bankCodes.find(b => b.code === newClientBank.bankCode);
+    const bankData = { ...newClientBank, bankName: bank?.name || '' };
+    setConfig(prev => ({
+      ...prev,
+      clients: prev.clients.map(c => 
+        c.clientId === selectedClientId 
+          ? { ...c, bankAccounts: [...(c.bankAccounts || []), bankData] }
+          : c
+      )
+    }));
+    setNewClientBank({ bankCode: '004', bankName: '', usdAccount: '', krwAccount: '' });
+  };
+  const deleteClientBank = (idx) => {
+    setConfig(prev => ({
+      ...prev,
+      clients: prev.clients.map(c => 
+        c.clientId === selectedClientId 
+          ? { ...c, bankAccounts: c.bankAccounts.filter((_, i) => i !== idx) }
+          : c
+      )
+    }));
+  };
+
+  const addClientTrader = () => {
+    if (!selectedClientId || !newClientTrader.name) return alert('담당자명을 입력해주세요.');
+    setConfig(prev => ({
+      ...prev,
+      clients: prev.clients.map(c => 
+        c.clientId === selectedClientId 
+          ? { ...c, traders: [...(c.traders || []), newClientTrader] }
+          : c
+      )
+    }));
+    setNewClientTrader({ name: '', role: 'trader', phone: '', email: '' });
+  };
+  const deleteClientTrader = (idx) => {
+    setConfig(prev => ({
+      ...prev,
+      clients: prev.clients.map(c => 
+        c.clientId === selectedClientId 
+          ? { ...c, traders: c.traders.filter((_, i) => i !== idx) }
+          : c
+      )
+    }));
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">⚙️ Settings</h2>
+        <div className="flex items-center gap-3">
+          {/* Master/Client 토글 */}
+          <div className="flex bg-kustody-navy rounded-lg p-1">
+            <button onClick={() => setViewMode('master')} 
+              className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${viewMode === 'master' ? 'bg-kustody-accent text-kustody-dark' : 'text-kustody-muted'}`}>
+              🏢 Master
+            </button>
+            <button onClick={() => setViewMode('client')} 
+              className={`px-4 py-2 rounded text-sm font-semibold transition-colors ${viewMode === 'client' ? 'bg-kustody-accent text-kustody-dark' : 'text-kustody-muted'}`}>
+              👤 Client
+            </button>
+          </div>
+          <button onClick={saveConfig} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg text-sm font-semibold">💾 저장</button>
+        </div>
+      </div>
+
+      {/* ========== Master View ========== */}
+      {viewMode === 'master' && (
+        <>
+          <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-xl p-4">
+            <p className="text-sm text-kustody-accent">🏢 <span className="font-semibold">Master 설정</span> - KustodyFi 내부 관리용 (거래 상대방, 내부 사용자)</p>
+          </div>
+
+          {/* Counter Party (KustodyFi의 거래상대방 = 은행들) */}
+          <div className="bg-kustody-surface rounded-xl p-5">
+            <h3 className="font-semibold mb-4">🏦 Counter Party (거래상대방 은행)</h3>
+            <div className="grid grid-cols-6 gap-2 mb-4">
+              <input placeholder="CP ID" value={newCP.cpId} onChange={(e) => setNewCP({...newCP, cpId: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <select value={newCP.bankCode} onChange={(e) => { const bank = bankCodes.find(b => b.code === e.target.value); setNewCP({...newCP, bankCode: e.target.value, name: bank?.name || ''}); }} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                {bankCodes.map(b => <option key={b.code} value={b.code}>{b.code} - {b.name}</option>)}
+              </select>
+              <input placeholder="명칭" value={newCP.name} onChange={(e) => setNewCP({...newCP, name: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <input placeholder="USD 계좌" value={newCP.accounts.USD} onChange={(e) => setNewCP({...newCP, accounts: {...newCP.accounts, USD: e.target.value}})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <input placeholder="KRW 계좌" value={newCP.accounts.KRW} onChange={(e) => setNewCP({...newCP, accounts: {...newCP.accounts, KRW: e.target.value}})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <button onClick={addCounterParty} className="px-3 py-2 bg-kustody-accent text-kustody-dark rounded text-sm font-semibold">추가</button>
+            </div>
+            <table className="w-full text-sm">
+              <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">CP ID</th><th className="text-left py-2">은행코드</th><th className="text-left py-2">명칭</th><th className="text-left py-2">USD 계좌</th><th className="text-left py-2">KRW 계좌</th><th className="text-center py-2">삭제</th></tr></thead>
+              <tbody>
+                {(config.counterParties || []).map(cp => (
+                  <tr key={cp.cpId} className="border-b border-kustody-border/30">
+                    <td className="py-2 font-mono">{cp.cpId}</td><td className="py-2">{cp.bankCode}</td><td className="py-2">{cp.name}</td><td className="py-2 font-mono text-xs">{cp.accounts?.USD}</td><td className="py-2 font-mono text-xs">{cp.accounts?.KRW}</td>
+                    <td className="py-2 text-center"><button onClick={() => deleteCP(cp.cpId)} className="text-red-400 hover:text-red-300">✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* KustodyFi 내부 사용자 */}
+          <div className="bg-kustody-surface rounded-xl p-5">
+            <h3 className="font-semibold mb-4">👤 내부 사용자 (KustodyFi)</h3>
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              <input placeholder="User ID" value={newUser.userId} onChange={(e) => setNewUser({...newUser, userId: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <input placeholder="이름" value={newUser.name} onChange={(e) => setNewUser({...newUser, name: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+              <select value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                <option value="trader">Trader</option><option value="input">Input</option><option value="approver">Approver</option>
+              </select>
+              <button onClick={addUser} className="px-3 py-2 bg-kustody-accent text-kustody-dark rounded text-sm font-semibold">추가</button>
+            </div>
+            <table className="w-full text-sm">
+              <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">User ID</th><th className="text-left py-2">이름</th><th className="text-left py-2">역할</th><th className="text-center py-2">삭제</th></tr></thead>
+              <tbody>
+                {(config.users || []).map(u => (
+                  <tr key={u.userId} className="border-b border-kustody-border/30">
+                    <td className="py-2 font-mono">{u.userId}</td><td className="py-2">{u.name}</td><td className="py-2 capitalize">{u.role}</td>
+                    <td className="py-2 text-center"><button onClick={() => deleteUser(u.userId)} className="text-red-400 hover:text-red-300">✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Bid/Ask Spread 설정 */}
+          <SpreadSettingsSection />
+
+          {/* User Feedback 조회 */}
+          <UserFeedbackSection />
+
+          {/* Usage Analytics */}
+          <UsageAnalyticsSection />
+        </>
+      )}
+
+      {/* ========== Client View ========== */}
+      {viewMode === 'client' && (
+        <>
+          {/* 고객 선택 */}
+          <div className="bg-kustody-surface rounded-xl p-5">
+            <div className="flex items-center gap-4">
+              <label className="text-sm text-kustody-muted">고객 선택:</label>
+              <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)}
+                className="flex-1 px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg">
+                <option value="">-- 고객을 선택하세요 --</option>
+                {config.clients?.map(c => (
+                  <option key={c.clientId} value={c.clientId}>{c.clientName} (Tier {c.creditTier})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedClient ? (
+            <>
+              {/* 고객 기본 정보 */}
+              <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-xl p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-kustody-accent text-lg">{selectedClient.clientName}</h3>
+                    <p className="text-sm text-kustody-muted mt-1">
+                      Client ID: {selectedClient.clientId} · Credit Tier: {selectedClient.creditTier} · 
+                      SEAL: <span className={selectedClient.sealLayer?.status === 'active' ? 'text-green-400' : 'text-yellow-400'}>{selectedClient.sealLayer?.status || 'N/A'}</span>
+                    </p>
+                  </div>
+                  <div className="text-right text-sm">
+                    <div className="text-kustody-muted">KYC: {selectedClient.sealLayer?.kycStatus || 'N/A'}</div>
+                    {selectedClient.sealLayer?.walletAddress && (
+                      <div className="font-mono text-xs text-kustody-muted mt-1">{selectedClient.sealLayer.walletAddress}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 고객 은행 계좌 */}
+              <div className="bg-kustody-surface rounded-xl p-5">
+                <h3 className="font-semibold mb-4">🏦 {selectedClient.clientName} 결제 계좌</h3>
+                <p className="text-xs text-kustody-muted mb-4">고객이 등록한 입출금 계좌 (고객 전용 화면에서는 본인 계좌만 표시)</p>
+                <div className="grid grid-cols-5 gap-2 mb-4">
+                  <select value={newClientBank.bankCode} onChange={(e) => setNewClientBank({...newClientBank, bankCode: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    {bankCodes.map(b => <option key={b.code} value={b.code}>{b.code} - {b.name}</option>)}
+                  </select>
+                  <input placeholder="USD 계좌번호" value={newClientBank.usdAccount} onChange={(e) => setNewClientBank({...newClientBank, usdAccount: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                  <input placeholder="KRW 계좌번호" value={newClientBank.krwAccount} onChange={(e) => setNewClientBank({...newClientBank, krwAccount: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                  <button onClick={addClientBank} className="px-3 py-2 bg-kustody-accent text-kustody-dark rounded text-sm font-semibold col-span-2">계좌 추가</button>
+                </div>
+                <table className="w-full text-sm">
+                  <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">은행</th><th className="text-left py-2">USD 계좌</th><th className="text-left py-2">KRW 계좌</th><th className="text-center py-2">삭제</th></tr></thead>
+                  <tbody>
+                    {(selectedClient.bankAccounts || []).length === 0 ? (
+                      <tr><td colSpan="4" className="py-4 text-center text-kustody-muted">등록된 계좌가 없습니다.</td></tr>
+                    ) : (
+                      (selectedClient.bankAccounts || []).map((acc, idx) => (
+                        <tr key={idx} className="border-b border-kustody-border/30">
+                          <td className="py-2">{acc.bankName || acc.bankCode}</td>
+                          <td className="py-2 font-mono">{acc.usdAccount}</td>
+                          <td className="py-2 font-mono">{acc.krwAccount}</td>
+                          <td className="py-2 text-center"><button onClick={() => deleteClientBank(idx)} className="text-red-400 hover:text-red-300">✕</button></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 고객 담당자 */}
+              <div className="bg-kustody-surface rounded-xl p-5">
+                <h3 className="font-semibold mb-4">👤 {selectedClient.clientName} 담당자</h3>
+                <p className="text-xs text-kustody-muted mb-4">거래 권한이 있는 담당자 (고객 전용 화면에서는 본인 팀만 표시)</p>
+                <div className="grid grid-cols-5 gap-2 mb-4">
+                  <input placeholder="이름" value={newClientTrader.name} onChange={(e) => setNewClientTrader({...newClientTrader, name: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                  <select value={newClientTrader.role} onChange={(e) => setNewClientTrader({...newClientTrader, role: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm">
+                    <option value="trader">Trader (거래)</option><option value="viewer">Viewer (조회)</option><option value="approver">Approver (승인)</option>
+                  </select>
+                  <input placeholder="전화번호" value={newClientTrader.phone} onChange={(e) => setNewClientTrader({...newClientTrader, phone: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                  <input placeholder="이메일" value={newClientTrader.email} onChange={(e) => setNewClientTrader({...newClientTrader, email: e.target.value})} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" />
+                  <button onClick={addClientTrader} className="px-3 py-2 bg-kustody-accent text-kustody-dark rounded text-sm font-semibold">담당자 추가</button>
+                </div>
+                <table className="w-full text-sm">
+                  <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">이름</th><th className="text-left py-2">역할</th><th className="text-left py-2">전화번호</th><th className="text-left py-2">이메일</th><th className="text-center py-2">삭제</th></tr></thead>
+                  <tbody>
+                    {(selectedClient.traders || []).length === 0 ? (
+                      <tr><td colSpan="5" className="py-4 text-center text-kustody-muted">등록된 담당자가 없습니다.</td></tr>
+                    ) : (
+                      (selectedClient.traders || []).map((t, idx) => (
+                        <tr key={idx} className="border-b border-kustody-border/30">
+                          <td className="py-2 font-semibold">{t.name}</td>
+                          <td className="py-2"><span className={`px-2 py-0.5 rounded text-xs ${t.role === 'trader' ? 'bg-blue-500/20 text-blue-400' : t.role === 'approver' ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-500/20 text-gray-400'}`}>{t.role}</span></td>
+                          <td className="py-2 font-mono text-xs">{t.phone}</td>
+                          <td className="py-2 text-xs">{t.email}</td>
+                          <td className="py-2 text-center"><button onClick={() => deleteClientTrader(idx)} className="text-red-400 hover:text-red-300">✕</button></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="bg-kustody-surface rounded-xl p-10 text-center text-kustody-muted">
+              👆 고객을 선택해주세요
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// 숫자 포맷팅 헬퍼
+const formatNumber = (num, decimals = 0) => {
+  if (num === null || num === undefined || isNaN(num)) return '-';
+  return num.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+
+// ==================== Advisory Tab ====================
+function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, pricingNotional, setPricingNotional }) {
+  const [curveData, setCurveData] = useState(null);
+  const [nearDate, setNearDate] = useState('2020-03-04'); // Swap Near leg (Start)
+  const [farDate, setFarDate] = useState('2020-04-06'); // Swap Far leg (Maturity) / Outright 결제일
+  const [showTradeForm, setShowTradeForm] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+  const [lastQuery, setLastQuery] = useState(null);
+  const [queryLog, setQueryLog] = useState([]); // 조회 로그 (tracking용)
+  const [tradeType, setTradeType] = useState('swap'); // 'outright' | 'swap'
+  const [direction, setDirection] = useState('borrow_usd'); // outright: 'buy'|'sell', swap: 'borrow_usd'|'lend_usd'
+  const [proMode, setProMode] = useState(false); // Pro Mode 토글
+  const [tradeForm, setTradeForm] = useState({ tradeDate: new Date().toISOString().split('T')[0], settlementDate: '', instrument: 'FX_SWAP', ccy1: 'USD', ccy1Amt: 1000000, ccy2: 'KRW', rate: '', counterParty: '', trader: '' });
+
+  useEffect(() => {
+    fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => {
+      if (data) { 
+        setCurveData(data); 
+        const spotDate = data.curves?.USDKRW?.USD?.spotDate; 
+        if (spotDate) { 
+          setNearDate(spotDate); // Near = Spot Date
+          const m = new Date(spotDate); 
+          m.setMonth(m.getMonth() + 1); 
+          setFarDate(m.toISOString().split('T')[0]); 
+        } 
+      }
+    });
+    // 조회 로그 로드
+    const saved = localStorage.getItem('kustodyfi_query_log');
+    if (saved) try { setQueryLog(JSON.parse(saved)); } catch(e) {}
+  }, []);
+
+  const spot = curveData?.spotRates?.USDKRW || 1193.87;
+  const fxSwapPoints = curveData?.curves?.USDKRW?.fxSwapPoints || [];
+
+  // 선택된 고객
+  const selectedClient = config.clients?.find(c => c.clientId === selectedClientId);
+  const creditTier = selectedClient ? config.creditTiers?.[selectedClient.creditTier] : null;
+  const isBlocked = selectedClient?.creditTier === 5;
+
+  // 마진 계산 (Client Pricing과 동일)
+  const calculateMargin = () => {
+    if (!selectedClient || isBlocked) return { credit: 0, notional: 0, total: 0 };
+    let creditMargin = 0, notionalMargin = 0;
+    if (!selectedClient.overrides?.ignoreCredit && creditTier) {
+      creditMargin = selectedClient.marginType === 'bp' ? (creditTier.bpMargin || 0) * 33 / 365 * spot / 10000 : (creditTier.pointMargin || 0);
+    }
+    if (!selectedClient.overrides?.ignoreNotional) {
+      const tier = config.notionalTiers?.find(t => pricingNotional >= t.min && (t.max === null || pricingNotional < t.max));
+      notionalMargin = tier?.margin || 0;
+    }
+    if (selectedClient.overrides?.customMargin !== null && selectedClient.overrides?.customMargin !== undefined) {
+      return { credit: 0, notional: 0, total: selectedClient.overrides.customMargin };
+    }
+    return { credit: creditMargin, notional: notionalMargin, total: creditMargin + notionalMargin };
+  };
+  const margin = calculateMargin();
+
+  // 마진 적용된 Bid/Ask
+  const getClientPoints = (basePoints, baseBid, baseAsk) => {
+    const marginInWon = margin.total / 100;
+    return {
+      bid: baseBid !== null ? baseBid - marginInWon : null,
+      ask: baseAsk !== null ? baseAsk + marginInWon : null,
+      mid: basePoints
+    };
+  };
+
+  // 보간 함수
+  const interpolateValue = (days, getValue) => {
+    if (days <= 0) return 0;
+    const sorted = fxSwapPoints.filter(p => p.days > 0).sort((a, b) => a.days - b.days);
+    if (sorted.length === 0) return 0;
+    const exact = sorted.find(p => p.days === days);
+    if (exact) return getValue(exact);
+    if (days < sorted[0].days) return getValue(sorted[0]) * days / sorted[0].days;
+    if (days > sorted[sorted.length - 1].days) return getValue(sorted[sorted.length - 1]) * days / sorted[sorted.length - 1].days;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].days <= days && sorted[i + 1].days >= days) {
+        const ratio = (days - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
+        return getValue(sorted[i]) + (getValue(sorted[i + 1]) - getValue(sorted[i])) * ratio;
+      }
+    }
+    return 0;
+  };
+
+  // 원화 환산
+  const krwAmount = pricingNotional * spot;
+
+  const handleQuery = () => {
+    if (!selectedClient) { alert('고객을 먼저 선택해주세요.'); return; }
+    if (isBlocked) { alert('거래가 제한된 고객입니다.'); return; }
+    
+    const spotDateObj = new Date(curveData?.curves?.USDKRW?.USD?.spotDate);
+    const targetDate = new Date(farDate);
+    const days = Math.round((targetDate - spotDateObj) / (1000 * 60 * 60 * 24));
+    
+    // Near leg days (Swap용)
+    const nearDateObj = new Date(nearDate);
+    const nearDays = Math.round((nearDateObj - spotDateObj) / (1000 * 60 * 60 * 24));
+    
+    const midPoints = interpolateValue(days, p => p.points);
+    const bidPoints = interpolateValue(days, p => p.bid);
+    const askPoints = interpolateValue(days, p => p.ask);
+    const clientPts = getClientPoints(midPoints, bidPoints, askPoints);
+    
+    // 적용 환율 결정 (방향에 따라)
+    // Outright: buy→Ask, sell→Bid
+    // Swap B/S (외화 차입): Far에서 USD 매도→Bid, Swap S/B (외화 대여): Far에서 USD 매수→Ask
+    const appliedRate = (direction === 'buy' || direction === 'lend_usd')
+      ? (clientPts.ask !== null ? spot + clientPts.ask : spot + midPoints)
+      : (clientPts.bid !== null ? spot + clientPts.bid : spot + midPoints);
+    
+    const queryData = {
+      nearDate: tradeType === 'swap' ? nearDate : null,
+      farDate,
+      nearDays: tradeType === 'swap' ? nearDays : null,
+      days,
+      points: midPoints,
+      bid: clientPts.bid,
+      ask: clientPts.ask,
+      forwardRate: spot + midPoints,
+      clientBidRate: clientPts.bid !== null ? spot + clientPts.bid : null,
+      clientAskRate: clientPts.ask !== null ? spot + clientPts.ask : null,
+      appliedRate,
+      tradeType,
+      direction,
+      timestamp: Date.now(),
+      clientId: selectedClientId,
+      clientName: selectedClient.clientName,
+      notional: pricingNotional,
+      krwAmount,
+      margin: margin.total
+    };
+    
+    setLastQuery(queryData);
+    
+    // tradeForm 업데이트 (거래 유형에 따라 instrument 설정)
+    const instrument = tradeType === 'outright' ? 'OUTRIGHT' : 'FX_SWAP';
+    setTradeForm(prev => ({ 
+      ...prev, 
+      settlementDate: farDate,
+      nearDate: tradeType === 'swap' ? nearDate : null,
+      rate: appliedRate.toFixed(2), 
+      ccy1Amt: pricingNotional,
+      instrument,
+      direction
+    }));
+    
+    // 조회 로그 저장 (tracking)
+    const newLog = [...queryLog, queryData].slice(-100); // 최근 100건만
+    setQueryLog(newLog);
+    localStorage.setItem('kustodyfi_query_log', JSON.stringify(newLog));
+    
+    setCountdown(10);
+    const timer = setInterval(() => { setCountdown(prev => { if (prev <= 1) { clearInterval(timer); setShowTradeForm(true); return null; } return prev - 1; }); }, 1000);
+  };
+
+  const handleSaveTrade = () => {
+    addTrade({ ...tradeForm, clientId: selectedClientId, ccy2Amt: tradeForm.ccy1Amt * parseFloat(tradeForm.rate), queryTimestamp: lastQuery?.timestamp, fairValue: lastQuery?.forwardRate });
+    setShowTradeForm(false); setCountdown(null); setLastQuery(null); alert('거래가 기록되었습니다!');
+  };
+
+  const optimal = fxSwapPoints.filter(p => p.days > 0 && p.days <= 90).sort((a, b) => Math.abs(a.points) / a.days - Math.abs(b.points) / b.days)[0];
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* 헤더: 타이틀 + 고객 선택 + Spot */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">🎯 Customer Advisory</h2>
+            <p className="text-sm text-kustody-muted mt-1">공정가치 조회 및 최적 전략 추천</p>
+          </div>
+          <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)}
+            className="px-4 py-2 bg-kustody-surface border border-kustody-border rounded-lg text-sm">
+            <option value="">-- 고객 선택 --</option>
+            {config.clients?.filter(c => c.creditTier !== 5).map(c => (
+              <option key={c.clientId} value={c.clientId}>{c.clientName}</option>
+            ))}
+          </select>
+        </div>
+        <div className="text-right text-sm text-kustody-muted">Spot: <span className="font-mono text-kustody-text">{formatNumber(spot, 2)}</span></div>
+      </div>
+
+      {selectedClient && !isBlocked && (
+        <>
+          {/* FX Swap Points 테이블 */}
+          <div className="bg-kustody-surface rounded-xl p-5">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold">📊 FX Swap Points</h3>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-xs text-kustody-muted">Pro Mode</span>
+                  <button onClick={() => setProMode(!proMode)} 
+                    className={`w-10 h-5 rounded-full transition-colors ${proMode ? 'bg-kustody-accent' : 'bg-kustody-border'}`}>
+                    <div className={`w-4 h-4 bg-white rounded-full transition-transform ${proMode ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
+                  </button>
+                </label>
+                <span className="text-xs text-kustody-muted">USDKRW · 전단위</span>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+                    <th className="text-left py-2 px-2">Tenor</th>
+                    <th className="text-left py-2 px-2">Start</th>
+                    <th className="text-left py-2 px-2">Maturity</th>
+                    <th className="text-right py-2 px-2">Days</th>
+                    <th className="text-right py-2 px-2">Screen</th>
+                    <th className="text-right py-2 px-2 text-kustody-accent">Sp/Day</th>
+                    {proMode && <th className="text-right py-2 px-2 text-yellow-400">Indic_rate</th>}
+                    <th className="text-right py-2 px-2 text-red-400">Bid</th>
+                    <th className="text-right py-2 px-2 text-green-400">Ask</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fxSwapPoints.map(p => {
+                    const clientPts = getClientPoints(p.points, p.bid, p.ask);
+                    // 표시용 days: Start에서 Maturity까지의 실제 기간
+                    const displayDays = p.start && p.maturity 
+                      ? Math.round((new Date(p.maturity) - new Date(p.start)) / (1000 * 60 * 60 * 24))
+                      : (p.days > 0 ? p.days : 1);
+                    // Screen은 전단위 (×100)
+                    const screenPips = p.points !== null ? Math.round(p.points * 100) : null;
+                    // Sp/Day도 전단위 기준으로 계산
+                    const spDay = (displayDays > 0 && screenPips !== null) ? (screenPips / displayDays).toFixed(2) : '-';
+                    const indicRate = (displayDays > 0 && p.points !== null) ? ((p.points / displayDays / spot) * 365 * 100).toFixed(2) + '%' : '-';
+                    return (
+                      <tr key={p.tenor} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                        <td className="py-2 px-2 font-semibold">{p.tenor}</td>
+                        <td className="py-2 px-2 font-mono text-xs text-kustody-muted">{p.start || '-'}</td>
+                        <td className="py-2 px-2 font-mono text-xs text-kustody-muted">{p.maturity || '-'}</td>
+                        <td className="py-2 px-2 text-right font-mono">{displayDays}</td>
+                        <td className="py-2 px-2 text-right font-mono">{screenPips !== null ? screenPips : '-'}</td>
+                        <td className="py-2 px-2 text-right font-mono text-kustody-accent">{spDay}</td>
+                        {proMode && <td className="py-2 px-2 text-right font-mono text-yellow-400">{indicRate}</td>}
+                        <td className="py-2 px-2 text-right font-mono text-red-400">{clientPts.bid !== null ? Math.round(clientPts.bid * 100) : '-'}</td>
+                        <td className="py-2 px-2 text-right font-mono text-green-400">{clientPts.ask !== null ? Math.round(clientPts.ask * 100) : '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 공정가치 조회 */}
+          <div className="bg-kustody-surface rounded-xl p-5">
+            <h3 className="font-semibold mb-4">📈 Point Interpolation - {selectedClient.clientName}</h3>
+            
+            {/* 거래 유형 선택 */}
+            <div className="mb-5 p-4 bg-kustody-navy/30 rounded-lg">
+              <div className="grid grid-cols-2 gap-6">
+                {/* 거래 유형 */}
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-2">거래 유형</label>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setTradeType('outright'); setDirection('sell'); }}
+                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${tradeType === 'outright' ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                      📤 단방향 (Outright)
+                    </button>
+                    <button onClick={() => { setTradeType('swap'); setDirection('borrow_usd'); }}
+                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${tradeType === 'swap' ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                      🔄 스왑 (FX Swap)
+                    </button>
+                  </div>
+                </div>
+                
+                {/* 방향 선택 */}
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-2">
+                    {tradeType === 'outright' ? '거래 방향' : '무엇이 먼저 필요하세요?'}
+                  </label>
+                  {tradeType === 'outright' ? (
+                    <div className="flex gap-2">
+                      <button onClick={() => setDirection('sell')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${direction === 'sell' ? 'bg-red-500 text-white' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                        🔴 외화 매도 (Sell USD)
+                      </button>
+                      <button onClick={() => setDirection('buy')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${direction === 'buy' ? 'bg-green-500 text-white' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                        🟢 외화 매수 (Buy USD)
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button onClick={() => setDirection('borrow_usd')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm transition-colors ${direction === 'borrow_usd' ? 'bg-blue-500 text-white' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                        <div className="font-semibold">💵 외화가 먼저 필요해요</div>
+                        <div className="text-xs opacity-80">외화 빌렸다가 갚기 (B/S)</div>
+                      </button>
+                      <button onClick={() => setDirection('lend_usd')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm transition-colors ${direction === 'lend_usd' ? 'bg-purple-500 text-white' : 'bg-kustody-dark text-kustody-muted border border-kustody-border'}`}>
+                        <div className="font-semibold">💴 원화가 먼저 필요해요</div>
+                        <div className="text-xs opacity-80">외화 빌려줬다가 받기 (S/B)</div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* 설명 */}
+              <div className="mt-3 text-xs text-kustody-muted">
+                {tradeType === 'outright' ? (
+                  direction === 'buy' 
+                    ? '💡 외화를 사서 보유합니다. 결제일에 원화를 지급하고 외화를 받습니다.'
+                    : '💡 외화를 팔아 원화를 받습니다. 결제일에 외화를 지급하고 원화를 받습니다.'
+                ) : (
+                  direction === 'borrow_usd'
+                    ? '💡 지금 외화를 빌리고(매수), 만기에 외화를 갚습니다(매도). 단기 외화 자금 필요 시 유용합니다.'
+                    : '💡 지금 외화를 빌려주고(매도), 만기에 외화를 돌려받습니다(매수). 외화 여유자금 운용 시 유용합니다.'
+                )}
+              </div>
+            </div>
+            
+            {/* 조회 입력 */}
+            <div className={`grid ${tradeType === 'swap' ? 'grid-cols-6' : 'grid-cols-5'} gap-4 mb-4`}>
+              {tradeType === 'swap' && (
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">
+                    {direction === 'borrow_usd' ? '💵 외화 빌리는 날' : '💴 외화 빌려주는 날'}
+                  </label>
+                  <input type="date" value={nearDate} onChange={(e) => setNearDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm" />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">
+                  {tradeType === 'swap' 
+                    ? (direction === 'borrow_usd' ? '💵 외화 갚을 날' : '💴 외화 돌려받을 날')
+                    : '결제일'}
+                </label>
+                <input type="date" value={farDate} onChange={(e) => setFarDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">Notional (USD)</label>
+                <input type="number" value={pricingNotional} onChange={(e) => setPricingNotional(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">원화 환산</label>
+                <div className="px-3 py-2 bg-kustody-navy rounded-lg font-mono text-sm">₩{formatNumber(krwAmount, 0)}</div>
+              </div>
+              <div>
+                <label className="block text-xs text-kustody-muted mb-1">
+                  Forward Points (전단위)
+                  {lastQuery && <span className="ml-1 text-kustody-accent">
+                    {(direction === 'sell' || direction === 'borrow_usd') ? '(Bid)' : '(Ask)'}
+                  </span>}
+                </label>
+                <div className={`px-3 py-2 bg-kustody-navy rounded-lg font-mono ${
+                  (direction === 'sell' || direction === 'borrow_usd') ? 'text-red-400' : 'text-green-400'
+                }`}>
+                  {lastQuery 
+                    ? ((direction === 'sell' || direction === 'borrow_usd') 
+                        ? (lastQuery.bid !== null ? Math.round(lastQuery.bid * 100) : '-')
+                        : (lastQuery.ask !== null ? Math.round(lastQuery.ask * 100) : '-'))
+                    : '-'}
+                </div>
+              </div>
+              <div className="flex items-end">
+                <button onClick={handleQuery} className="w-full px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold">조회</button>
+              </div>
+            </div>
+
+            {lastQuery && (
+              <div className="bg-kustody-navy/50 rounded-lg p-4">
+                {/* 거래 유형 표시 */}
+                <div className="mb-3 pb-3 border-b border-kustody-border/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded text-sm font-semibold ${tradeType === 'outright' ? 'bg-kustody-accent/20 text-kustody-accent' : 'bg-blue-500/20 text-blue-400'}`}>
+                      {tradeType === 'outright' ? '📤 Outright' : '🔄 FX Swap'}
+                    </span>
+                    <span className={`px-3 py-1 rounded text-sm ${
+                      direction === 'buy' ? 'bg-green-500/20 text-green-400' :
+                      direction === 'sell' ? 'bg-red-500/20 text-red-400' :
+                      direction === 'borrow_usd' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-purple-500/20 text-purple-400'
+                    }`}>
+                      {direction === 'buy' ? '매수 (Buy)' :
+                       direction === 'sell' ? '매도 (Sell)' :
+                       direction === 'borrow_usd' ? 'B/S (외화 차입)' :
+                       'S/B (외화 대여)'}
+                    </span>
+                  </div>
+                  <div className="text-sm font-mono">
+                    <span className="text-kustody-muted">Days: </span>
+                    <span className="text-kustody-accent font-semibold">{lastQuery.days}</span>
+                  </div>
+                </div>
+                
+                {tradeType === 'swap' ? (
+                  /* Swap 결과 - 빌리는/갚는 환율 */
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="bg-kustody-dark/50 rounded-lg p-4 text-center">
+                      <div className="text-xs text-kustody-muted mb-1">
+                        {direction === 'borrow_usd' ? '💵 빌리는 날' : '💴 빌려주는 날'}
+                      </div>
+                      <div className="font-mono text-blue-400 mb-3">{lastQuery.nearDate}</div>
+                      <div className="text-xs text-kustody-muted mb-1">
+                        {direction === 'borrow_usd' ? '빌리는 환율 (Near)' : '빌려주는 환율 (Near)'}
+                      </div>
+                      <div className="font-mono text-2xl font-semibold">{formatNumber(spot, 2)}</div>
+                      <div className="text-xs text-kustody-muted mt-1">Spot Rate</div>
+                    </div>
+                    <div className="bg-kustody-dark/50 rounded-lg p-4 text-center">
+                      <div className="text-xs text-kustody-muted mb-1">
+                        {direction === 'borrow_usd' ? '💵 갚을 날' : '💴 돌려받을 날'}
+                      </div>
+                      <div className="font-mono text-blue-400 mb-3">{lastQuery.farDate}</div>
+                      <div className="text-xs text-kustody-muted mb-1">
+                        {direction === 'borrow_usd' ? '갚는 환율 (Far)' : '돌려받는 환율 (Far)'}
+                      </div>
+                      <div className={`font-mono text-2xl font-semibold ${direction === 'borrow_usd' ? 'text-red-400' : 'text-green-400'}`}>
+                        {formatNumber(lastQuery.appliedRate, 2)}
+                      </div>
+                      <div className="text-xs text-kustody-muted mt-1">
+                        Spot {direction === 'borrow_usd' ? '+' : '+'} {direction === 'borrow_usd' 
+                          ? (lastQuery.bid !== null ? (lastQuery.bid).toFixed(2) : '-')
+                          : (lastQuery.ask !== null ? (lastQuery.ask).toFixed(2) : '-')} 원
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Outright 결과 */
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="bg-kustody-dark/50 rounded-lg p-4 text-center">
+                      <div className="text-xs text-kustody-muted mb-1">결제일</div>
+                      <div className="font-mono text-blue-400 text-lg">{lastQuery.farDate}</div>
+                    </div>
+                    <div className="bg-kustody-dark/50 rounded-lg p-4 text-center">
+                      <div className="text-xs text-kustody-muted mb-1">
+                        {direction === 'buy' ? '매수 환율' : '매도 환율'}
+                      </div>
+                      <div className={`font-mono text-2xl font-semibold ${direction === 'buy' ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatNumber(lastQuery.appliedRate, 2)}
+                      </div>
+                      <div className="text-xs text-kustody-muted mt-1">
+                        {direction === 'buy' ? 'Ask' : 'Bid'} Rate
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {countdown && <div className="mt-4 text-center text-kustody-muted">거래 여부 확인까지 <span className="text-kustody-accent font-mono">{countdown}</span>초...</div>}
+          </div>
+
+          {/* 최적 구간 추천 */}
+          {optimal && (
+            <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-xl p-5">
+              <h3 className="font-semibold mb-2 text-kustody-accent">⭐ 최적 구간 추천</h3>
+              <p className="text-sm">일정에 이슈가 없다면, <span className="font-semibold text-kustody-accent">{optimal.tenor} ({optimal.days}일)</span>이 carry 효율이 가장 좋습니다. (Sp/Day: {(optimal.points * 100 / optimal.days).toFixed(2)})</p>
+            </div>
+          )}
+
+          {/* Uneven Swap 관심도 수집 */}
+          {selectedClient && tradeType === 'swap' && (
+            <div className="bg-kustody-surface rounded-xl p-4 border border-kustody-border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-kustody-muted">Near/Far 금액이 다른 <span className="text-kustody-accent font-semibold">Uneven Swap</span>이 필요하신가요?</p>
+                  <p className="text-xs text-kustody-muted mt-1">현재는 Even Swap만 지원됩니다</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    const existing = JSON.parse(localStorage.getItem('stablefx_feature_interest') || '{}');
+                    existing.unevenSwap = (existing.unevenSwap || 0) + 1;
+                    existing.lastClicked = new Date().toISOString();
+                    localStorage.setItem('stablefx_feature_interest', JSON.stringify(existing));
+                    alert('관심 등록되었습니다! Uneven Swap 기능 개발 시 반영하겠습니다.');
+                  }}
+                  className="px-4 py-2 bg-kustody-navy hover:bg-kustody-accent/20 border border-kustody-border rounded-lg text-sm transition-colors"
+                >
+                  🙋 필요해요
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 거래 기록 폼 */}
+          {showTradeForm && (
+            <div className="bg-kustody-surface rounded-xl p-5 border-2 border-kustody-accent">
+              <h3 className="font-semibold mb-4">📝 거래 기록</h3>
+              <p className="text-sm text-kustody-muted mb-4">방금 조회한 가격으로 거래하셨나요?</p>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div><label className="block text-xs text-kustody-muted mb-1">거래일</label><input type="date" value={tradeForm.tradeDate} onChange={(e) => setTradeForm({...tradeForm, tradeDate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
+                <div><label className="block text-xs text-kustody-muted mb-1">결제일</label><input type="date" value={tradeForm.settlementDate} onChange={(e) => setTradeForm({...tradeForm, settlementDate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
+                <div><label className="block text-xs text-kustody-muted mb-1">Instrument</label><select value={tradeForm.instrument} onChange={(e) => setTradeForm({...tradeForm, instrument: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="SPOT">Spot</option><option value="FX_SWAP">FX Swap</option><option value="OUTRIGHT">Outright</option></select></div>
+                <div><label className="block text-xs text-kustody-muted mb-1">CCY1</label><input value={tradeForm.ccy1} onChange={(e) => setTradeForm({...tradeForm, ccy1: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm" /></div>
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-1">CCY1 금액</label>
+                  <input type="text" value={formatNumber(tradeForm.ccy1Amt, 0)} 
+                    onChange={(e) => setTradeForm({...tradeForm, ccy1Amt: parseFloat(e.target.value.replace(/,/g, '')) || 0})} 
+                    className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" />
+                  <div className="text-xs text-kustody-muted mt-1">≈ ₩{formatNumber(tradeForm.ccy1Amt * spot, 0)}</div>
+                </div>
+                <div><label className="block text-xs text-kustody-muted mb-1">환율</label><input value={tradeForm.rate} onChange={(e) => setTradeForm({...tradeForm, rate: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm font-mono" /></div>
+                <div><label className="block text-xs text-kustody-muted mb-1">거래상대방</label><select value={tradeForm.counterParty} onChange={(e) => setTradeForm({...tradeForm, counterParty: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="">선택</option>{(config.counterParties || []).map(cp => <option key={cp.cpId} value={cp.cpId}>{cp.name}</option>)}</select></div>
+                <div><label className="block text-xs text-kustody-muted mb-1">거래자</label><select value={tradeForm.trader} onChange={(e) => setTradeForm({...tradeForm, trader: e.target.value})} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded text-sm"><option value="">선택</option>{(config.users || []).filter(u => u.role === 'trader').map(u => <option key={u.userId} value={u.userId}>{u.name}</option>)}</select></div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleSaveTrade} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded font-semibold">💾 저장</button>
+                <button onClick={() => setShowTradeForm(false)} className="px-4 py-2 bg-kustody-navy text-kustody-text rounded">취소</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 고객 미선택 또는 Blocked */}
+      {!selectedClient && (
+        <div className="bg-kustody-surface rounded-xl p-10 text-center text-kustody-muted">
+          👆 고객을 선택해주세요
+        </div>
+      )}
+      {!selectedClient && (
+        <div className="bg-kustody-surface rounded-xl p-10 text-center">
+          <div className="text-kustody-muted text-lg mb-2">👆 고객을 선택해주세요</div>
+          <div className="text-sm text-kustody-muted">상단에서 고객을 선택하면 FX Swap Points와 조회 기능을 사용할 수 있습니다.</div>
+        </div>
+      )}
+      {isBlocked && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-10 text-center">
+          <div className="text-red-400 text-xl mb-2">🚫 거래 불가</div>
+          <div className="text-kustody-muted">내부 정책에 의해 거래가 제한되었습니다.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== Blotter Tab ====================
+function BlotterTab({ blotter, config, deleteTrade, selectedClientId, setSelectedClientId }) {
+  const getCP = (cpId) => (config.counterParties || []).find(c => c.cpId === cpId)?.name || cpId;
+  const getClient = (clientId) => config.clients?.find(c => c.clientId === clientId)?.clientName || '';
+  
+  // 고객 필터 적용
+  const filteredBlotter = selectedClientId 
+    ? blotter.filter(t => t.clientId === selectedClientId)
+    : blotter;
+  
+  const selectedClient = config.clients?.find(c => c.clientId === selectedClientId);
+  
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div><h2 className="text-xl font-semibold">📋 Blotter</h2><p className="text-sm text-kustody-muted mt-1">거래 내역 관리</p></div>
+        <div className="flex items-center gap-4">
+          <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)}
+            className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm">
+            <option value="">🔍 전체 고객</option>
+            {config.clients?.map(c => (
+              <option key={c.clientId} value={c.clientId}>{c.clientName}</option>
+            ))}
+          </select>
+          <div className="text-sm text-kustody-muted">
+            {selectedClientId ? `${selectedClient?.clientName}: ` : ''}총 {filteredBlotter.length}건
+          </div>
+        </div>
+      </div>
+      
+      {selectedClientId && selectedClient && (
+        <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-xl p-4">
+          <div className="flex items-center gap-6 text-sm">
+            <span className="text-kustody-accent font-semibold">👤 {selectedClient.clientName}</span>
+            <span className="text-kustody-muted">Tier {selectedClient.creditTier}</span>
+            <span className="text-kustody-muted">|</span>
+            <span className="text-kustody-muted">등록 은행: {selectedClient.bankAccounts?.length || 0}개</span>
+            <span className="text-kustody-muted">|</span>
+            <span className="text-kustody-muted">담당자: {selectedClient.traders?.length || 0}명</span>
+          </div>
+        </div>
+      )}
+      
+      <div className="bg-kustody-surface rounded-xl p-5"><div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border">
+            <th className="text-left py-2 px-2">Trade ID</th>
+            {!selectedClientId && <th className="text-left py-2 px-2">고객</th>}
+            <th className="text-left py-2 px-2">거래일</th>
+            <th className="text-left py-2 px-2">결제일</th>
+            <th className="text-center py-2 px-2">Instrument</th>
+            <th className="text-right py-2 px-2">CCY1</th>
+            <th className="text-right py-2 px-2">CCY1 Amt</th>
+            <th className="text-right py-2 px-2">CCY2 Amt</th>
+            <th className="text-right py-2 px-2">환율</th>
+            <th className="text-left py-2 px-2">상대방</th>
+            <th className="text-center py-2 px-2">삭제</th>
+          </tr></thead>
+          <tbody>{filteredBlotter.length === 0 ? (
+            <tr><td colSpan={selectedClientId ? "10" : "11"} className="py-8 text-center text-kustody-muted">거래 내역이 없습니다.</td></tr>
+          ) : filteredBlotter.map(t => (
+            <tr key={t.tradeId} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+              <td className="py-2 px-2 font-mono text-xs">{t.tradeId}</td>
+              {!selectedClientId && <td className="py-2 px-2 text-xs">{getClient(t.clientId)}</td>}
+              <td className="py-2 px-2 font-mono text-xs">{t.tradeDate}</td>
+              <td className="py-2 px-2 font-mono text-xs">{t.settlementDate}</td>
+              <td className="py-2 px-2 text-center"><span className={`px-2 py-0.5 rounded text-xs ${t.instrument === 'SPOT' ? 'bg-blue-500/20 text-blue-400' : t.instrument === 'FX_SWAP' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>{t.instrument}</span></td>
+              <td className="py-2 px-2 text-right font-mono">{t.ccy1}</td>
+              <td className="py-2 px-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td>
+              <td className="py-2 px-2 text-right font-mono">{formatNumber(t.ccy2Amt, 0)}</td>
+              <td className="py-2 px-2 text-right font-mono text-kustody-accent">{formatNumber(parseFloat(t.rate), 2)}</td>
+              <td className="py-2 px-2 text-xs">{getCP(t.counterParty)}</td>
+              <td className="py-2 px-2 text-center"><button onClick={() => deleteTrade(t.tradeId)} className="text-red-400 hover:text-red-300">✕</button></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div></div>
+    </div>
+  );
+}
+
+// ==================== Cash Schedule Tab ====================
+function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientId }) {
+  const [selectedCcy, setSelectedCcy] = useState('USD');
+  const [curveData, setCurveData] = useState(null);
+  useEffect(() => { fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
+
+  // 고객 필터 적용
+  const filteredBlotter = selectedClientId 
+    ? blotter.filter(t => t.clientId === selectedClientId)
+    : blotter;
+  
+  const selectedClient = config.clients?.find(c => c.clientId === selectedClientId);
+
+  const getDF = (days, ccy) => {
+    if (!curveData) return 1;
+    const tenors = curveData.curves?.USDKRW?.[ccy]?.tenors || [];
+    if (tenors.length === 0) return 1;
+    
+    const sorted = [...tenors].sort((a, b) => a.days - b.days);
+    
+    const interpolate = (d) => {
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i].days <= d && sorted[i + 1].days >= d) {
+          const r = (d - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
+          return sorted[i].df + (sorted[i + 1].df - sorted[i].df) * r;
+        }
+      }
+      if (d <= sorted[0].days) return sorted[0].df;
+      if (d >= sorted[sorted.length - 1].days) return sorted[sorted.length - 1].df;
+      return 1;
+    };
+    
+    const todayDF = interpolate(0);
+    const df = interpolate(days);
+    return df / todayDF;
+  };
+
+  const schedule = (() => {
+    const today = new Date(), flows = {};
+    filteredBlotter.forEach(t => { const d = t.settlementDate; if (!flows[d]) flows[d] = { SPOT: 0, SWAP: 0, OUTRIGHT: 0 }; const amt = t.ccy1 === selectedCcy ? -t.ccy1Amt : t.ccy2Amt; flows[d][t.instrument === 'SPOT' ? 'SPOT' : t.instrument === 'FX_SWAP' ? 'SWAP' : 'OUTRIGHT'] += amt || 0; });
+    return Object.entries(flows).map(([date, f]) => { const days = Math.round((new Date(date) - today) / 864e5); const sum = f.SPOT + f.SWAP + f.OUTRIGHT; const df = getDF(days, selectedCcy); return { date, days, sum, df, npv: sum * df, ...f }; }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  })();
+  const totalNPV = schedule.reduce((s, r) => s + r.npv, 0);
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div><h2 className="text-xl font-semibold">💵 Cash Schedule</h2><p className="text-sm text-kustody-muted mt-1">통화별 캐시플로우</p></div>
+        <div className="flex items-center gap-3">
+          <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)}
+            className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm">
+            <option value="">🔍 전체 고객</option>
+            {config.clients?.map(c => (
+              <option key={c.clientId} value={c.clientId}>{c.clientName}</option>
+            ))}
+          </select>
+          <select value={selectedCcy} onChange={(e) => setSelectedCcy(e.target.value)} className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg text-sm">
+            <option value="USD">USD</option>
+            <option value="KRW">KRW</option>
+          </select>
+        </div>
+      </div>
+      
+      {selectedClientId && selectedClient && (
+        <div className="bg-kustody-accent/10 border border-kustody-accent/30 rounded-xl p-4">
+          <div className="flex items-center gap-6 text-sm">
+            <span className="text-kustody-accent font-semibold">👤 {selectedClient.clientName}</span>
+            <span className="text-kustody-muted">거래 {filteredBlotter.length}건</span>
+          </div>
+        </div>
+      )}
+      
+      <div className="bg-kustody-surface rounded-xl p-5"><div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">날짜</th><th className="text-right py-2 px-2">SUM</th><th className="text-right py-2 px-2">DF</th><th className="text-right py-2 px-2">NPV</th><th className="text-right py-2 px-2">SPOT</th><th className="text-right py-2 px-2">SWAP</th><th className="text-right py-2 px-2">OUTRIGHT</th></tr></thead>
+          <tbody>{schedule.length === 0 ? <tr><td colSpan="7" className="py-8 text-center text-kustody-muted">데이터가 없습니다.</td></tr> : schedule.map((r, i) => (
+            <tr key={i} className="border-b border-kustody-border/30">
+              <td className="py-2 px-2 font-mono">{r.date}</td>
+              <td className={`py-2 px-2 text-right font-mono ${r.sum >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.sum, 0)}</td>
+              <td className="py-2 px-2 text-right font-mono text-kustody-muted">{r.df.toFixed(8)}</td>
+              <td className={`py-2 px-2 text-right font-mono ${r.npv >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.npv, 2)}</td>
+              <td className="py-2 px-2 text-right font-mono text-blue-400">{r.SPOT !== 0 ? formatNumber(r.SPOT, 0) : '-'}</td>
+              <td className="py-2 px-2 text-right font-mono text-purple-400">{r.SWAP !== 0 ? formatNumber(r.SWAP, 0) : '-'}</td>
+              <td className="py-2 px-2 text-right font-mono text-green-400">{r.OUTRIGHT !== 0 ? formatNumber(r.OUTRIGHT, 0) : '-'}</td>
+            </tr>
+          ))}</tbody>
+          <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td className="py-2 px-2">Total NPV</td><td colSpan="2"></td><td className={`py-2 px-2 text-right font-mono ${totalNPV >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalNPV, 2)}</td><td colSpan="3"></td></tr></tfoot>
+        </table>
+      </div></div>
+    </div>
+  );
+}
+
+// ==================== Valuation Tab ====================
+function ValuationTab({ blotter, fixingRate, setFixingRate }) {
+  const [curveData, setCurveData] = useState(null);
+  const [valuationDate, setValuationDate] = useState(new Date().toISOString().split('T')[0]);
+  const [decimalPlaces, setDecimalPlaces] = useState(2);
+  const [showFull, setShowFull] = useState(false);
+  useEffect(() => { fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
+
+  const getRebasedDF = (days) => {
+    if (!curveData) return 1;
+    const tenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
+    if (tenors.length === 0) return 1;
+    
+    const sorted = [...tenors].sort((a, b) => a.days - b.days);
+    
+    // 보간 함수
+    const interpolate = (d) => {
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i].days <= d && sorted[i + 1].days >= d) {
+          const r = (d - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
+          return sorted[i].df + (sorted[i + 1].df - sorted[i].df) * r;
+        }
+      }
+      if (d <= sorted[0].days) return sorted[0].df;
+      if (d >= sorted[sorted.length - 1].days) return sorted[sorted.length - 1].df;
+      return 1;
+    };
+    
+    // Today (Days=0)의 DF를 보간해서 구함
+    const todayDF = interpolate(0);
+    
+    // 해당 days의 DF를 보간해서 구하고 todayDF로 나눔
+    const df = interpolate(days);
+    
+    return df / todayDF;
+  };
+
+  const dailyRates = (() => { const rates = [], today = new Date(valuationDate); for (let d = 0; d <= 730; d++) { const date = new Date(today); date.setDate(date.getDate() + d); const df = getRebasedDF(d); rates.push({ date: date.toISOString().split('T')[0], days: d, df, forwardRate: fixingRate * df }); } return rates; })();
+
+  const evalTrades = (() => { const today = new Date(valuationDate); return blotter.filter(t => new Date(t.settlementDate) > today).map(t => { const days = Math.round((new Date(t.settlementDate) - today) / 864e5); const df = getRebasedDF(days); const evalRate = fixingRate * df; const pnl = (evalRate - (parseFloat(t.rate) || 0)) * (t.ccy1Amt || 0); return { ...t, days, df, evalRate, pnl }; }); })();
+  const totalPnL = evalTrades.reduce((s, t) => s + t.pnl, 0);
+
+  const downloadCSV = () => { const h = 'Date,Days,DF,Forward_Rate\n'; const r = dailyRates.map(x => `${x.date},${x.days},${x.df.toFixed(decimalPlaces)},${x.forwardRate.toFixed(decimalPlaces)}`).join('\n'); const b = new Blob([h + r], { type: 'text/csv' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `valuation_${valuationDate}_${decimalPlaces}dp.csv`; a.click(); URL.revokeObjectURL(u); };
+  const fmt = (n, f = null) => n.toFixed(f ?? (showFull ? 8 : 2));
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div><h2 className="text-xl font-semibold">📊 IFRS Valuation</h2><p className="text-sm text-kustody-muted mt-1">공정가치 평가 및 고시</p></div>
+      <div className="bg-kustody-surface rounded-xl p-5"><div className="grid grid-cols-4 gap-4">
+        <div><label className="block text-xs text-kustody-muted mb-1">평가일</label><input type="date" value={valuationDate} onChange={(e) => setValuationDate(e.target.value)} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">재무환율 (매매기준율)</label><input type="number" step="0.01" value={fixingRate} onChange={(e) => setFixingRate(parseFloat(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">CSV 소수점</label><select value={decimalPlaces} onChange={(e) => setDecimalPlaces(parseInt(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"><option value={2}>2자리</option><option value={4}>4자리</option><option value={6}>6자리</option><option value={8}>8자리</option></select></div>
+        <div className="flex items-end gap-2"><button onClick={() => setShowFull(!showFull)} className={`px-3 py-2 rounded-lg text-sm ${showFull ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-navy'}`}>{showFull ? '8자리' : '2자리'}</button><button onClick={downloadCSV} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold">📥 CSV</button></div>
+      </div></div>
+      <div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">📈 Daily Forward Rate (Today=1, 재무환율×DF)</h3><div className="overflow-x-auto max-h-96">
+        <table className="w-full text-sm"><thead className="sticky top-0 bg-kustody-surface"><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">Date</th><th className="text-right py-2 px-2">Days</th><th className="text-right py-2 px-2">DF (Rebased)</th><th className="text-right py-2 px-2">Forward Rate</th></tr></thead>
+        <tbody>{dailyRates.slice(0, 100).map((r, i) => (<tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20"><td className="py-1 px-2 font-mono text-xs">{r.date}</td><td className="py-1 px-2 text-right font-mono text-kustody-muted">{r.days}</td><td className="py-1 px-2 text-right font-mono">{fmt(r.df, 8)}</td><td className="py-1 px-2 text-right font-mono text-kustody-accent">{fmt(r.forwardRate)}</td></tr>))}</tbody></table>
+        <p className="text-xs text-kustody-muted mt-2 text-center">처음 100일만 표시 (CSV로 전체 다운로드)</p>
+      </div></div>
+      {evalTrades.length > 0 && (<div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">💹 미결제 거래 평가</h3>
+        <table className="w-full text-sm"><thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">결제일</th><th className="text-right py-2">Days</th><th className="text-right py-2">거래환율</th><th className="text-right py-2">평가환율</th><th className="text-right py-2">Notional</th><th className="text-right py-2">미실현손익</th></tr></thead>
+        <tbody>{evalTrades.map((t, i) => (<tr key={i} className="border-b border-kustody-border/30"><td className="py-2 font-mono text-xs">{t.settlementDate}</td><td className="py-2 text-right font-mono text-kustody-muted">{t.days}</td><td className="py-2 text-right font-mono">{formatNumber(parseFloat(t.rate), 2)}</td><td className="py-2 text-right font-mono text-kustody-accent">{formatNumber(t.evalRate, 2)}</td><td className="py-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td><td className={`py-2 text-right font-mono font-semibold ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(t.pnl, 0)}</td></tr>))}</tbody>
+        <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td colSpan="5" className="py-2">Total 미실현손익</td><td className={`py-2 text-right font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalPnL, 0)} KRW</td></tr></tfoot>
+      </table></div>)}
+    </div>
+  );
+}

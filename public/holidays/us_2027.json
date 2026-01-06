@@ -1,0 +1,21 @@
+{
+  "year": 2027,
+  "country": "US",
+  "updated_at": "2025-01-06",
+  "holidays": [
+    {"date": "2027-01-01", "name": "New Year's Day", "type": "fixed"},
+    {"date": "2027-01-18", "name": "Martin Luther King Jr. Day", "type": "floating"},
+    {"date": "2027-02-15", "name": "Presidents Day", "type": "floating"},
+    {"date": "2027-05-31", "name": "Memorial Day", "type": "floating"},
+    {"date": "2027-06-18", "name": "Juneteenth (Observed)", "type": "fixed"},
+    {"date": "2027-06-19", "name": "Juneteenth", "type": "fixed"},
+    {"date": "2027-07-04", "name": "Independence Day", "type": "fixed"},
+    {"date": "2027-07-05", "name": "Independence Day (Observed)", "type": "fixed"},
+    {"date": "2027-09-06", "name": "Labor Day", "type": "floating"},
+    {"date": "2027-10-11", "name": "Columbus Day", "type": "floating"},
+    {"date": "2027-11-11", "name": "Veterans Day", "type": "fixed"},
+    {"date": "2027-11-25", "name": "Thanksgiving", "type": "floating"},
+    {"date": "2027-12-24", "name": "Christmas Day (Observed)", "type": "fixed"},
+    {"date": "2027-12-25", "name": "Christmas Day", "type": "fixed"}
+  ]
+}

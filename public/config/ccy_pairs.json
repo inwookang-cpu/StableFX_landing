@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "description": "CCY Pair Standard Configuration",
+  "lastUpdated": "2025-01-06",
+  
+  "localCurrency": "KRW",
+  
+  "currencyHierarchy": {
+    "description": "Base currency 우선순위. Local CCY는 항상 Quote에 위치",
+    "baseOrder": ["EUR", "GBP", "AUD", "NZD", "USD", "CAD", "CHF", "JPY", "CNH"]
+  },
+
+  "notes": {
+    "pipDecimals": "1 pip = 1/(10^pipDecimals). USDKRW: 2 → 0.01원(1전), EURUSD: 4 → 0.0001",
+    "swapDisplayMultiplier": "스왑포인트 화면 표시 배수. USDKRW: ×100 (전 단위)",
+    "swapDisplayUnit": "스왑포인트 화면 표시 단위명"
+  },
+
+  "pairs": {
+    "USDKRW": {
+      "baseCcy": "USD",
+      "quoteCcy": "KRW",
+      "spotDisplayDecimals": 2,
+      "swapDisplayDecimals": 2,
+      "pipDecimals": 2,
+      "swapDisplayMultiplier": 100,
+      "swapDisplayUnit": "전",
+      "calendars": ["KR", "US"],
+      "spotDays": 2,
+      "active": true
+    },
+    "USDJPY": {
+      "baseCcy": "USD",
+      "quoteCcy": "JPY",
+      "spotDisplayDecimals": 3,
+      "swapDisplayDecimals": 3,
+      "pipDecimals": 2,
+      "swapDisplayMultiplier": 100,
+      "swapDisplayUnit": "pip",
+      "calendars": ["JP", "US"],
+      "spotDays": 2,
+      "active": true
+    },
+    "EURUSD": {
+      "baseCcy": "EUR",
+      "quoteCcy": "USD",
+      "spotDisplayDecimals": 5,
+      "swapDisplayDecimals": 5,
+      "pipDecimals": 4,
+      "swapDisplayMultiplier": 10000,
+      "swapDisplayUnit": "pip",
+      "calendars": ["EU", "US"],
+      "spotDays": 2,
+      "active": true
+    }
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "system": {
+    "name": "KustodyFi FX System",
+    "version": "0.1.0",
+    "environment": "development"
+  },
+
+  "user": {
+    "code": "IW",
+    "name": "강인우",
+    "role": "admin"
+  },
+
+  "defaultSettings": {
+    "baseCurrency": "USD",
+    "displayCurrency": "KRW",
+    "timezone": "Asia/Seoul",
+    "locale": "ko-KR"
+  },
+
+  "supportedCurrencies": [
+    {
+      "code": "USD",
+      "name": "US Dollar",
+      "symbol": "$",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "KRW",
+      "name": "Korean Won",
+      "symbol": "₩",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "JPY",
+      "name": "Japanese Yen",
+      "symbol": "¥",
+      "decimalPlaces": 0
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "symbol": "€",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "GBP",
+      "name": "British Pound",
+      "symbol": "£",
+      "decimalPlaces": 2
+    },
+    {
+      "code": "CNH",
+      "name": "Chinese Yuan (Offshore)",
+      "symbol": "¥",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "HKD",
+      "name": "Hong Kong Dollar",
+      "symbol": "HK$",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "CHF",
+      "name": "Swiss Franc",
+      "symbol": "CHF",
+      "decimalPlaces": 4
+    },
+    {
+      "code": "AUD",
+      "name": "Australian Dollar",
+      "symbol": "A$",
+      "decimalPlaces": 4
+    }
+  ],
+
+  "supportedCurrencyPairs": [
+    "USDKRW",
+    "USDJPY",
+    "EURUSD",
+    "GBPUSD",
+    "USDCNH",
+    "USDHKD",
+    "USDCHF",
+    "AUDUSD",
+    "EURJPY",
+    "GBPJPY",
+    "AUDJPY"
+  ],
+
+  "tenors": {
+    "shortTerm": ["O/N", "T/N", "S/N", "1W", "2W", "3W"],
+    "mediumTerm": ["1M", "2M", "3M", "4M", "5M", "6M"],
+    "longTerm": ["9M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y"]
+  },
+
+  "calendars": {
+    "KR": {
+      "name": "South Korea",
+      "weekend": [0, 6],
+      "holidayFile": "holidays/kr_{year}.json"
+    },
+    "US": {
+      "name": "United States",
+      "weekend": [0, 6],
+      "holidayFile": "holidays/us_{year}.json"
+    },
+    "JP": {
+      "name": "Japan",
+      "weekend": [0, 6],
+      "holidayFile": "holidays/jp_{year}.json"
+    },
+    "TARGET": {
+      "name": "TARGET (EU)",
+      "weekend": [0, 6],
+      "holidayFile": "holidays/target_{year}.json"
+    },
+    "HK": {
+      "name": "Hong Kong",
+      "weekend": [0, 6],
+      "holidayFile": "holidays/hk_{year}.json"
+    }
+  },
+
+  "riskSettings": {
+    "defaultLineFee": 0.0007,
+    "defaultFngbRate": 0.0031,
+    "rwaCalculation": true,
+    "dv01Multiplier": 1000000
+  },
+
+  "displaySettings": {
+    "spotRateDecimalPlaces": {
+      "USDKRW": 2,
+      "USDJPY": 2,
+      "EURUSD": 4,
+      "GBPUSD": 4,
+      "USDCNH": 4,
+      "default": 4
+    },
+    "forwardPointsFormat": "pips",
+    "rateFormat": "percentage",
+    "amountFormat": "thousands"
+  },
+
+  "dataRefresh": {
+    "spotRateInterval": 1000,
+    "curveRefreshInterval": 5000,
+    "historicalDataInterval": 10000
+  },
+
+  "fileNaming": {
+    "curveSnapshot": "{YYYYMMDD}_{userCode}.json",
+    "tradeBlotter": "{YYYYMMDD}_blotter.json",
+    "positionReport": "{YYYYMMDD}_position.json"
+  },
+
+  "brokers": [
+    {"code": "선물차익용", "name": "선물차익용", "type": "internal"},
+    {"code": "스팟헷지", "name": "스팟헷지", "type": "internal"},
+    {"code": "내부만난거", "name": "내부거래", "type": "internal"},
+    {"code": "선물스프레드", "name": "선물스프레드", "type": "internal"},
+    {"code": "ICAP", "name": "ICAP", "type": "broker"},
+    {"code": "Tullett", "name": "Tullett Prebon", "type": "broker"},
+    {"code": "BGC", "name": "BGC Partners", "type": "broker"}
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "currencyPair": "USDCNH",
+  "baseCurrency": "USD",
+  "quoteCurrency": "CNH",
+  "description": "US Dollar / Chinese Yuan (Offshore)",
+  
+  "dateConvention": {
+    "spotDays": 2,
+    "businessDayConvention": "MD_FOLLOWING",
+    "endOfMonthRule": true,
+    "calendars": ["US", "HK"]
+  },
+
+  "dayCount": {
+    "base": {
+      "currency": "USD",
+      "convention": "ACT/360",
+      "daysPerYear": 360
+    },
+    "quote": {
+      "currency": "CNH",
+      "convention": "ACT/365",
+      "daysPerYear": 365
+    }
+  },
+
+  "instruments": {
+    "cash": [
+      {
+        "tenor": "O/N",
+        "type": "CASH",
+        "baseTicker": "US00O/N Index",
+        "quoteTicker": "CCNHON Index",
+        "description": "Overnight Rate"
+      },
+      {
+        "tenor": "1W",
+        "type": "CASH",
+        "baseTicker": "US0001W Index",
+        "quoteTicker": "CCNH1W Index",
+        "description": "1 Week"
+      },
+      {
+        "tenor": "1M",
+        "type": "CASH",
+        "baseTicker": "US0001M Index",
+        "quoteTicker": "CCNH1M Index",
+        "description": "1 Month"
+      },
+      {
+        "tenor": "3M",
+        "type": "CASH",
+        "baseTicker": "US0003M Index",
+        "quoteTicker": "CCNH3M Index",
+        "description": "3 Month"
+      }
+    ],
+    "swap": [
+      {
+        "tenor": "6M",
+        "type": "SWAP",
+        "baseTicker": "USSWF Curncy",
+        "quoteTicker": null,
+        "description": "6 Month IRS"
+      },
+      {
+        "tenor": "1Y",
+        "type": "SWAP",
+        "baseTicker": "USSW1 BGN Curncy",
+        "quoteTicker": "CCSWO1 Curncy",
+        "description": "1 Year IRS"
+      },
+      {
+        "tenor": "2Y",
+        "type": "SWAP",
+        "baseTicker": "USSW2 BGN Curncy",
+        "quoteTicker": "CCSWO2 Curncy",
+        "description": "2 Year IRS"
+      },
+      {
+        "tenor": "5Y",
+        "type": "SWAP",
+        "baseTicker": "USSW5 BGN Curncy",
+        "quoteTicker": "CCSWO5 Curncy",
+        "description": "5 Year IRS"
+      }
+    ],
+    "fxSwap": [
+      {
+        "tenor": "O/N",
+        "ticker": "CCSWTN Curncy",
+        "description": "FX Swap T/N"
+      },
+      {
+        "tenor": "1W",
+        "ticker": "CCSW1W Curncy",
+        "description": "FX Swap 1W"
+      },
+      {
+        "tenor": "1M",
+        "ticker": "CCSW1M Curncy",
+        "description": "FX Swap 1M"
+      },
+      {
+        "tenor": "3M",
+        "ticker": "CCSW3M Curncy",
+        "description": "FX Swap 3M"
+      },
+      {
+        "tenor": "6M",
+        "ticker": "CCSW6M Curncy",
+        "description": "FX Swap 6M"
+      },
+      {
+        "tenor": "1Y",
+        "ticker": "CCSW1Y Curncy",
+        "description": "FX Swap 1Y"
+      }
+    ]
+  },
+
+  "spotTicker": "USDCNH Curncy",
+  
+  "spreadConfig": {
+    "cash": {
+      "bidAskSpread": 5,
+      "description": "Cash spread in pips"
+    },
+    "swap": {
+      "bidAskSpread": {
+        "1W": 5,
+        "1M": 10,
+        "3M": 20,
+        "6M": 30,
+        "1Y": 50,
+        "2Y": 100
+      }
+    }
+  },
+
+  "riskParameters": {
+    "lineFee": 0.001,
+    "fngbRate": 0.004,
+    "rwaMultiplier": 0.0015,
+    "dv01Multiplier": 1000000
+  },
+
+  "quoteConvention": {
+    "spotDecimalPlaces": 4,
+    "forwardPointsDecimalPlaces": 4,
+    "rateDecimalPlaces": 5
+  }
+}

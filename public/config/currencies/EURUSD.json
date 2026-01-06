@@ -1,0 +1,167 @@
+{
+  "currencyPair": "EURUSD",
+  "baseCurrency": "EUR",
+  "quoteCurrency": "USD",
+  "description": "Euro / US Dollar",
+  
+  "dateConvention": {
+    "spotDays": 2,
+    "businessDayConvention": "MD_FOLLOWING",
+    "endOfMonthRule": true,
+    "calendars": ["US", "TARGET"]
+  },
+
+  "dayCount": {
+    "base": {
+      "currency": "EUR",
+      "convention": "ACT/360",
+      "daysPerYear": 360
+    },
+    "quote": {
+      "currency": "USD",
+      "convention": "ACT/360",
+      "daysPerYear": 360
+    }
+  },
+
+  "instruments": {
+    "cash": [
+      {
+        "tenor": "O/N",
+        "type": "CASH",
+        "baseTicker": "EONIA Index",
+        "quoteTicker": "US00O/N Index",
+        "description": "Overnight Rate"
+      },
+      {
+        "tenor": "1W",
+        "type": "CASH",
+        "baseTicker": "EUR001W Index",
+        "quoteTicker": "US0001W Index",
+        "description": "1 Week"
+      },
+      {
+        "tenor": "1M",
+        "type": "CASH",
+        "baseTicker": "EUR001M Index",
+        "quoteTicker": "US0001M Index",
+        "description": "1 Month"
+      },
+      {
+        "tenor": "3M",
+        "type": "CASH",
+        "baseTicker": "EUR003M Index",
+        "quoteTicker": "US0003M Index",
+        "description": "3 Month EURIBOR"
+      },
+      {
+        "tenor": "6M",
+        "type": "CASH",
+        "baseTicker": "EUR006M Index",
+        "quoteTicker": "US0006M Index",
+        "description": "6 Month EURIBOR"
+      }
+    ],
+    "swap": [
+      {
+        "tenor": "1Y",
+        "type": "SWAP",
+        "baseTicker": "EUSW1 Curncy",
+        "quoteTicker": "USSW1 BGN Curncy",
+        "description": "1 Year IRS"
+      },
+      {
+        "tenor": "2Y",
+        "type": "SWAP",
+        "baseTicker": "EUSW2 Curncy",
+        "quoteTicker": "USSW2 BGN Curncy",
+        "description": "2 Year IRS"
+      },
+      {
+        "tenor": "3Y",
+        "type": "SWAP",
+        "baseTicker": "EUSW3 Curncy",
+        "quoteTicker": "USSW3 BGN Curncy",
+        "description": "3 Year IRS"
+      },
+      {
+        "tenor": "5Y",
+        "type": "SWAP",
+        "baseTicker": "EUSW5 Curncy",
+        "quoteTicker": "USSW5 BGN Curncy",
+        "description": "5 Year IRS"
+      },
+      {
+        "tenor": "10Y",
+        "type": "SWAP",
+        "baseTicker": "EUSW10 Curncy",
+        "quoteTicker": "USSW10 BGN Curncy",
+        "description": "10 Year IRS"
+      }
+    ],
+    "fxSwap": [
+      {
+        "tenor": "O/N",
+        "ticker": "EUSWTN Curncy",
+        "description": "FX Swap T/N"
+      },
+      {
+        "tenor": "1W",
+        "ticker": "EUSW1W Curncy",
+        "description": "FX Swap 1W"
+      },
+      {
+        "tenor": "1M",
+        "ticker": "EUSW1M Curncy",
+        "description": "FX Swap 1M"
+      },
+      {
+        "tenor": "3M",
+        "ticker": "EUSW3M Curncy",
+        "description": "FX Swap 3M"
+      },
+      {
+        "tenor": "6M",
+        "ticker": "EUSW6M Curncy",
+        "description": "FX Swap 6M"
+      },
+      {
+        "tenor": "1Y",
+        "ticker": "EUSW1Y Curncy",
+        "description": "FX Swap 1Y"
+      }
+    ]
+  },
+
+  "spotTicker": "EURUSD Curncy",
+  
+  "spreadConfig": {
+    "cash": {
+      "bidAskSpread": 1,
+      "description": "Cash spread in pips"
+    },
+    "swap": {
+      "bidAskSpread": {
+        "1W": 0.5,
+        "1M": 1,
+        "3M": 2,
+        "6M": 3,
+        "1Y": 5,
+        "2Y": 10
+      }
+    }
+  },
+
+  "riskParameters": {
+    "lineFee": 0.0003,
+    "fngbRate": 0.0015,
+    "rwaMultiplier": 0.001,
+    "dv01Multiplier": 1000000
+  },
+
+  "quoteConvention": {
+    "spotDecimalPlaces": 4,
+    "forwardPointsDecimalPlaces": 4,
+    "rateDecimalPlaces": 5
+  }
+}

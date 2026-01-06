@@ -1,0 +1,160 @@
+{
+  "currencyPair": "USDJPY",
+  "baseCurrency": "USD",
+  "quoteCurrency": "JPY",
+  "description": "US Dollar / Japanese Yen",
+  
+  "dateConvention": {
+    "spotDays": 2,
+    "businessDayConvention": "MD_FOLLOWING",
+    "endOfMonthRule": true,
+    "calendars": ["US", "JP"]
+  },
+
+  "dayCount": {
+    "base": {
+      "currency": "USD",
+      "convention": "ACT/360",
+      "daysPerYear": 360
+    },
+    "quote": {
+      "currency": "JPY",
+      "convention": "ACT/360",
+      "daysPerYear": 360
+    }
+  },
+
+  "instruments": {
+    "cash": [
+      {
+        "tenor": "O/N",
+        "type": "CASH",
+        "baseTicker": "US00O/N Index",
+        "quoteTicker": "MUTSCALM Index",
+        "description": "Overnight Rate"
+      },
+      {
+        "tenor": "1W",
+        "type": "CASH",
+        "baseTicker": "US0001W Index",
+        "quoteTicker": "JY0001W Index",
+        "description": "1 Week"
+      },
+      {
+        "tenor": "1M",
+        "type": "CASH",
+        "baseTicker": "US0001M Index",
+        "quoteTicker": "JY0001M Index",
+        "description": "1 Month"
+      },
+      {
+        "tenor": "3M",
+        "type": "CASH",
+        "baseTicker": "US0003M Index",
+        "quoteTicker": "JY0003M Index",
+        "description": "3 Month"
+      }
+    ],
+    "swap": [
+      {
+        "tenor": "6M",
+        "type": "SWAP",
+        "baseTicker": "USSWF Curncy",
+        "quoteTicker": "JYSW6M Curncy",
+        "description": "6 Month IRS"
+      },
+      {
+        "tenor": "1Y",
+        "type": "SWAP",
+        "baseTicker": "USSW1 BGN Curncy",
+        "quoteTicker": "JYSW1 Curncy",
+        "description": "1 Year IRS"
+      },
+      {
+        "tenor": "2Y",
+        "type": "SWAP",
+        "baseTicker": "USSW2 BGN Curncy",
+        "quoteTicker": "JYSW2 Curncy",
+        "description": "2 Year IRS"
+      },
+      {
+        "tenor": "3Y",
+        "type": "SWAP",
+        "baseTicker": "USSW3 BGN Curncy",
+        "quoteTicker": "JYSW3 Curncy",
+        "description": "3 Year IRS"
+      },
+      {
+        "tenor": "5Y",
+        "type": "SWAP",
+        "baseTicker": "USSW5 BGN Curncy",
+        "quoteTicker": "JYSW5 Curncy",
+        "description": "5 Year IRS"
+      }
+    ],
+    "fxSwap": [
+      {
+        "tenor": "O/N",
+        "ticker": "JYSWTN Curncy",
+        "description": "FX Swap T/N"
+      },
+      {
+        "tenor": "1W",
+        "ticker": "JYSW1W Curncy",
+        "description": "FX Swap 1W"
+      },
+      {
+        "tenor": "1M",
+        "ticker": "JYSW1M Curncy",
+        "description": "FX Swap 1M"
+      },
+      {
+        "tenor": "3M",
+        "ticker": "JYSW3M Curncy",
+        "description": "FX Swap 3M"
+      },
+      {
+        "tenor": "6M",
+        "ticker": "JYSW6MF Curncy",
+        "description": "FX Swap 6M"
+      },
+      {
+        "tenor": "1Y",
+        "ticker": "JYSW1YF Curncy",
+        "description": "FX Swap 1Y"
+      }
+    ]
+  },
+
+  "spotTicker": "USDJPY Curncy",
+  
+  "spreadConfig": {
+    "cash": {
+      "bidAskSpread": 2,
+      "description": "Cash spread in pips"
+    },
+    "swap": {
+      "bidAskSpread": {
+        "1W": 1,
+        "1M": 2,
+        "3M": 3,
+        "6M": 5,
+        "1Y": 10,
+        "2Y": 20
+      }
+    }
+  },
+
+  "riskParameters": {
+    "lineFee": 0.0005,
+    "fngbRate": 0.002,
+    "rwaMultiplier": 0.001,
+    "dv01Multiplier": 1000000
+  },
+
+  "quoteConvention": {
+    "spotDecimalPlaces": 2,
+    "forwardPointsDecimalPlaces": 2,
+    "rateDecimalPlaces": 5
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "year": 2026,
+  "country": "US",
+  "updated_at": "2025-01-06",
+  "holidays": [
+    {"date": "2026-01-01", "name": "New Year's Day", "type": "fixed"},
+    {"date": "2026-01-19", "name": "Martin Luther King Jr. Day", "type": "floating"},
+    {"date": "2026-02-16", "name": "Presidents Day", "type": "floating"},
+    {"date": "2026-05-25", "name": "Memorial Day", "type": "floating"},
+    {"date": "2026-06-19", "name": "Juneteenth", "type": "fixed"},
+    {"date": "2026-07-03", "name": "Independence Day (Observed)", "type": "fixed"},
+    {"date": "2026-07-04", "name": "Independence Day", "type": "fixed"},
+    {"date": "2026-09-07", "name": "Labor Day", "type": "floating"},
+    {"date": "2026-10-12", "name": "Columbus Day", "type": "floating"},
+    {"date": "2026-11-11", "name": "Veterans Day", "type": "fixed"},
+    {"date": "2026-11-26", "name": "Thanksgiving", "type": "floating"},
+    {"date": "2026-12-25", "name": "Christmas Day", "type": "fixed"}
+  ]
+}

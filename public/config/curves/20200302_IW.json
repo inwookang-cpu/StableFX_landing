@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "referenceDate": "2020-03-02",
+    "createdBy": "IW",
+    "createdAt": "2020-03-02T18:00:00+09:00",
+    "version": "1.0",
+    "source": "20200302_IW.xlsx"
+  },
+
+  "spotRates": {
+    "USDKRW": 1193.85,
+    "USDJPY": 108.25,
+    "USDHKD": 7.7839,
+    "USDCHF": 0.9646,
+    "USDCNH": 6.9703,
+    "EURUSD": 1.1044,
+    "GBPUSD": 1.2843,
+    "AUDUSD": 0.6529
+  },
+
+  "curves": {
+    "USDKRW": {
+      "USD": {
+        "dayCount": 360,
+        "spotDate": "2020-03-04",
+        "tenors": [
+          {"tenor": "O/N", "maturity": "2020-03-03", "days": -1, "type": "CASH", "rate": 1.5678, "df": 1.000087, "lnDF": 8.71073e-05},
+          {"tenor": "Spot", "maturity": "2020-03-04", "days": 0, "type": "CASH", "rate": 1.5678, "df": 1.000000, "lnDF": 0},
+          {"tenor": "1W", "maturity": "2020-03-11", "days": 7, "type": "CASH", "rate": 1.5680, "df": 0.999695, "lnDF": -0.000304842},
+          {"tenor": "1M", "maturity": "2020-04-06", "days": 33, "type": "CASH", "rate": 1.5153, "df": 0.998613, "lnDF": -0.001388015},
+          {"tenor": "2M", "maturity": "2020-05-04", "days": 61, "type": "CASH", "rate": 1.5026, "df": 0.997460, "lnDF": -0.002542887},
+          {"tenor": "3M", "maturity": "2020-06-04", "days": 92, "type": "CASH", "rate": 1.4628, "df": 0.996276, "lnDF": -0.003731169},
+          {"tenor": "6M", "maturity": "2020-09-04", "days": 184, "type": "SWAP", "rate": 1.1649, "df": 0.994081, "lnDF": -0.005936661},
+          {"tenor": "1Y", "maturity": "2021-03-04", "days": 365, "type": "SWAP", "rate": 0.9955, "df": 0.990123, "lnDF": -0.009926115},
+          {"tenor": "2Y", "maturity": "2022-03-04", "days": 730, "type": "SWAP", "rate": 0.8679, "df": 0.982845, "lnDF": -0.017304145},
+          {"tenor": "3Y", "maturity": "2023-03-06", "days": 1097, "type": "SWAP", "rate": 0.8526, "df": 0.974774, "lnDF": -0.025549166},
+          {"tenor": "4Y", "maturity": "2024-03-04", "days": 1461, "type": "SWAP", "rate": 0.8699, "df": 0.965887, "lnDF": -0.034708791},
+          {"tenor": "5Y", "maturity": "2025-03-04", "days": 1826, "type": "SWAP", "rate": 0.9013, "df": 0.956019, "lnDF": -0.044977897},
+          {"tenor": "6Y", "maturity": "2026-03-04", "days": 2191, "type": "SWAP", "rate": 0.9308, "df": 0.945749, "lnDF": -0.055777695},
+          {"tenor": "7Y", "maturity": "2027-03-04", "days": 2556, "type": "SWAP", "rate": 0.9602, "df": 0.935035, "lnDF": -0.067171318},
+          {"tenor": "8Y", "maturity": "2028-03-06", "days": 2924, "type": "SWAP", "rate": 0.9924, "df": 0.923611, "lnDF": -0.079464134},
+          {"tenor": "9Y", "maturity": "2029-03-05", "days": 3288, "type": "SWAP", "rate": 1.0243, "df": 0.911813, "lnDF": -0.092320793},
+          {"tenor": "10Y", "maturity": "2030-03-04", "days": 3652, "type": "SWAP", "rate": 1.0551, "df": 0.899663, "lnDF": -0.105734508},
+          {"tenor": "11Y", "maturity": "2031-03-04", "days": 4017, "type": "SWAP", "rate": 1.0830, "df": 0.887362, "lnDF": -0.11950259}
+        ]
+      },
+      "KRW": {
+        "dayCount": 365,
+        "spotDate": "2020-03-04",
+        "tenors": [
+          {"tenor": "O/N", "maturity": "2020-03-03", "days": -2, "type": "FX", "rate": 1.1093, "df": 1.000061, "dfBid": 1.000054, "dfAsk": 1.000070, "lnDF": 6.07777e-05, "lnDfBid": 5.36036e-05, "lnDfAsk": 7.03562e-05},
+          {"tenor": "T/N", "maturity": "2020-03-04", "days": -1, "type": "FX", "rate": 1.1093, "df": 1.000030, "dfBid": 1.000027, "dfAsk": 1.000035, "lnDF": 3.03893e-05, "lnDfBid": 2.6802e-05, "lnDfAsk": 3.51787e-05},
+          {"tenor": "Spot", "maturity": "2020-03-04", "days": 0, "type": "FX", "rate": 1.1093, "df": 1.000000, "dfBid": 1.000000, "dfAsk": 1.000000, "lnDF": 0, "lnDfBid": 0, "lnDfAsk": 0},
+          {"tenor": "1W", "maturity": "2020-03-11", "days": 7, "type": "FX", "rate": 1.1092, "df": 0.999787, "dfBid": 0.999796, "dfAsk": 0.999766, "lnDF": -0.000212699, "lnDfBid": -0.000204322, "lnDfAsk": -0.000233642},
+          {"tenor": "1M", "maturity": "2020-04-06", "days": 33, "type": "FX", "rate": 1.0724, "df": 0.999031, "dfBid": 0.999115, "dfAsk": 0.999031, "lnDF": -0.000969115, "lnDfBid": -0.000885313, "lnDfAsk": -0.000969115},
+          {"tenor": "2M", "maturity": "2020-05-04", "days": 61, "type": "FX", "rate": 0.9959, "df": 0.998338, "dfBid": 0.998380, "dfAsk": 0.998297, "lnDF": -0.001662993, "lnDfBid": -0.001621074, "lnDfAsk": -0.00170491},
+          {"tenor": "3M", "maturity": "2020-06-04", "days": 92, "type": "FX", "rate": 0.9660, "df": 0.997571, "dfBid": 0.997613, "dfAsk": 0.997529, "lnDF": -0.002432005, "lnDfBid": -0.002390069, "lnDfAsk": -0.00247394},
+          {"tenor": "6M", "maturity": "2020-09-04", "days": 184, "type": "FX", "rate": 0.5961, "df": 0.997004, "dfBid": 0.997255, "dfAsk": 0.997004, "lnDF": -0.003000664, "lnDfBid": -0.002748605, "lnDfAsk": -0.003000664},
+          {"tenor": "1Y", "maturity": "2021-03-04", "days": 365, "type": "SWAP", "rate": 0.3848, "df": 0.996163, "dfBid": 0.997644, "dfAsk": 0.997139, "lnDF": -0.003844273, "lnDfBid": -0.00235892, "lnDfAsk": -0.002865185},
+          {"tenor": "2Y", "maturity": "2022-03-04", "days": 730, "type": "SWAP", "rate": 0.3148, "df": 0.993729, "dfBid": 0.995316, "dfAsk": 0.992140, "lnDF": -0.006290848, "lnDfBid": -0.004694731, "lnDfAsk": -0.007891194},
+          {"tenor": "3Y", "maturity": "2023-03-06", "days": 1097, "type": "SWAP", "rate": 0.2903, "df": 0.991319, "dfBid": 0.993704, "dfAsk": 0.988967, "lnDF": -0.008719343, "lnDfBid": -0.005576657, "lnDfAsk": -0.009574437},
+          {"tenor": "4Y", "maturity": "2024-03-04", "days": 1461, "type": "SWAP", "rate": 0.2949, "df": 0.988275, "dfBid": 0.991439, "dfAsk": 0.985198, "lnDF": -0.011793931, "lnDfBid": -0.006315824, "lnDfAsk": -0.011094517},
+          {"tenor": "5Y", "maturity": "2025-03-04", "days": 1826, "type": "SWAP", "rate": 0.2899, "df": 0.985614, "dfBid": 0.989259, "dfAsk": 0.987087, "lnDF": -0.014490567, "lnDfBid": -0.007445392, "lnDfAsk": -0.012995839},
+          {"tenor": "6Y", "maturity": "2026-03-04", "days": 2191, "type": "SWAP", "rate": 0.3151, "df": 0.981279, "dfBid": 0.991439, "dfAsk": 0.985198, "lnDF": -0.018898203, "lnDfBid": -0.008597887, "lnDfAsk": -0.014912223},
+          {"tenor": "7Y", "maturity": "2027-03-04", "days": 2556, "type": "SWAP", "rate": 0.3555, "df": 0.975434, "dfBid": 0.990476, "dfAsk": 0.983488, "lnDF": -0.024872848, "lnDfBid": -0.00956814, "lnDfAsk": -0.016655891}
+        ]
+      },
+      "fxSwapPoints": [
+        {"tenor": "O/N", "start": "2020-03-02", "maturity": "2020-03-03", "days": -1, "points": -0.05, "bid": -0.20, "ask": 0.10},
+        {"tenor": "T/N", "start": "2020-03-03", "maturity": "2020-03-04", "days": 0, "points": -0.015, "bid": -0.17, "ask": 0.14},
+        {"tenor": "1W", "start": "2020-03-04", "maturity": "2020-03-11", "days": 7, "points": -0.11, "bid": -0.36, "ask": 0.14},
+        {"tenor": "1M", "start": "2020-03-04", "maturity": "2020-04-06", "days": 33, "points": -0.50, "bid": -1.00, "ask": 0.00},
+        {"tenor": "2M", "start": "2020-03-04", "maturity": "2020-05-04", "days": 61, "points": -1.05, "bid": -2.05, "ask": -0.05},
+        {"tenor": "3M", "start": "2020-03-04", "maturity": "2020-06-04", "days": 92, "points": -1.55, "bid": -2.80, "ask": -0.30},
+        {"tenor": "6M", "start": "2020-03-04", "maturity": "2020-09-04", "days": 184, "points": -3.50, "bid": -5.50, "ask": -1.50},
+        {"tenor": "1Y", "start": "2020-03-04", "maturity": "2021-03-04", "days": 365, "points": -8.90, "bid": null, "ask": null},
+        {"tenor": "2Y", "start": "2020-03-04", "maturity": "2022-03-04", "days": 730, "points": null, "bid": null, "ask": null}
+      ],
+      "impliedYield": [
+        {"tenor": "O/N", "days": 1, "usdRate": 1.56775, "krwRate": 1.1093, "impliedRate": 1.1093, "spread": -0.46},
+        {"tenor": "T/N", "days": 1, "usdRate": 1.56775, "krwRate": 1.1093, "impliedRate": 1.1093, "spread": -0.46},
+        {"tenor": "1W", "days": 7, "usdRate": 1.56800, "krwRate": 1.1092, "impliedRate": 1.1092, "spread": -0.46},
+        {"tenor": "1M", "days": 33, "usdRate": 1.51525, "krwRate": 1.0724, "impliedRate": 1.0724, "spread": -0.44},
+        {"tenor": "2M", "days": 61, "usdRate": 1.50263, "krwRate": 0.9959, "impliedRate": 0.9959, "spread": -0.51},
+        {"tenor": "3M", "days": 92, "usdRate": 1.46275, "krwRate": 0.9661, "impliedRate": 0.9661, "spread": -0.50},
+        {"tenor": "6M", "days": 184, "usdRate": 1.16490, "krwRate": 0.5961, "impliedRate": 0.5961, "spread": -0.57},
+        {"tenor": "1Y", "days": 365, "usdRate": 0.99550, "krwRate": 0.3848, "impliedRate": 0.3848, "spread": -0.61},
+        {"tenor": "1.5Y", "days": 551, "usdRate": 0.93000, "krwRate": 0.3486, "impliedRate": 0.3486, "spread": -0.58},
+        {"tenor": "2Y", "days": 730, "usdRate": 0.86790, "krwRate": 0.3148, "impliedRate": 0.3148, "spread": -0.55},
+        {"tenor": "3Y", "days": 1097, "usdRate": 0.85255, "krwRate": 0.2903, "impliedRate": 0.2903, "spread": -0.56},
+        {"tenor": "4Y", "days": 1461, "usdRate": 0.86990, "krwRate": 0.2949, "impliedRate": 0.2949, "spread": -0.57}
+      ]
+    }
+  },
+
+  "forwardSpreads": {
+    "USDKRW": [
+      {"spread": "1Wx1M", "nearTenor": "1W", "farTenor": "1M", "points": -0.39, "bid": -0.64, "ask": -0.14},
+      {"spread": "1x2", "nearTenor": "1M", "farTenor": "2M", "points": -0.55, "bid": -1.05, "ask": -0.05},
+      {"spread": "1x3", "nearTenor": "1M", "farTenor": "3M", "points": -1.05, "bid": -1.80, "ask": -0.30},
+      {"spread": "2x3", "nearTenor": "2M", "farTenor": "3M", "points": -0.50, "bid": -0.75, "ask": -0.25},
+      {"spread": "3x6", "nearTenor": "3M", "farTenor": "6M", "points": -1.95, "bid": -2.70, "ask": -1.20},
+      {"spread": "6x12", "nearTenor": "6M", "farTenor": "1Y", "points": -5.40, "bid": null, "ask": null}
+    ]
+  }
+}
