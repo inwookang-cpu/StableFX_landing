@@ -3713,6 +3713,7 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
   const [direction, setDirection] = useState('borrow_usd'); // outright: 'buy'|'sell', swap: 'borrow_usd'|'lend_usd'
   const [proMode, setProMode] = useState(false); // Pro Mode 토글
   const [usdMmda, setUsdMmda] = useState(4.5); // USD MMDA 금리 (%)
+  const [krwMmda, setKrwMmda] = useState(3.0); // KRW 고금리통장 금리 (%)
   const [tradeForm, setTradeForm] = useState({ tradeDate: new Date().toISOString().split('T')[0], settlementDate: '', instrument: 'FX_SWAP', ccy1: 'USD', ccy1Amt: 1000000, ccy2: 'KRW', rate: '', counterParty: '', trader: '' });
 
   useEffect(() => {
@@ -4166,15 +4167,15 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
             </div>
           )}
 
-          {/* MMDA vs FX Swap 비교 */}
+          {/* 기회비용 비교 */}
           {lastQuery && tradeType === 'swap' && (
             <div className="bg-kustody-surface rounded-xl p-5 border border-kustody-border">
-              <h3 className="font-semibold mb-4 text-kustody-accent">💰 MMDA vs FX Swap 비교</h3>
+              <h3 className="font-semibold mb-4 text-kustody-accent">💰 기회비용 비교</h3>
               
-              {/* MMDA 금리 입력 */}
-              <div className="flex items-center gap-4 mb-4">
-                <label className="text-sm text-kustody-muted">USD MMDA 금리:</label>
+              {/* 금리 입력 */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="flex items-center gap-2">
+                  <label className="text-sm text-kustody-muted">USD MMDA:</label>
                   <input 
                     type="number" 
                     step="0.1"
@@ -4182,117 +4183,199 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
                     onChange={(e) => setUsdMmda(parseFloat(e.target.value) || 0)}
                     className="w-20 px-2 py-1 bg-kustody-dark border border-kustody-border rounded font-mono text-sm text-center" 
                   />
-                  <span className="text-sm text-kustody-muted">% (연)</span>
+                  <span className="text-sm text-kustody-muted">%</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-kustody-muted">KRW MMDA:</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={krwMmda} 
+                    onChange={(e) => setKrwMmda(parseFloat(e.target.value) || 0)}
+                    className="w-20 px-2 py-1 bg-kustody-dark border border-kustody-border rounded font-mono text-sm text-center" 
+                  />
+                  <span className="text-sm text-kustody-muted">%</span>
                 </div>
               </div>
 
               {(() => {
-                // 내재금리 계산
+                const days = lastQuery.days;
                 const swapPoint = direction === 'borrow_usd' ? lastQuery.bid : lastQuery.ask;
-                const impliedRate = (swapPoint / spot) * (365 / lastQuery.days) * 100;
                 
-                // 금액 계산
+                // 캐시플로우 계산
                 const nearKrw = pricingNotional * spot;
                 const farKrw = pricingNotional * (spot + swapPoint);
-                const swapPnl = farKrw - nearKrw; // 양수면 이득, 음수면 손실
-                const swapPnlAnnualized = swapPnl * (365 / lastQuery.days);
+                const swapCostKrw = nearKrw - farKrw; // B/S: 양수면 비용, S/B: 음수면 비용
                 
-                // MMDA 기회비용 (연환산)
-                const mmdaEarning = pricingNotional * (usdMmda / 100);
-                const mmdaPeriodEarning = mmdaEarning * (lastQuery.days / 365);
-                
-                // 비교 분석
-                let recommendation, analysis, diff;
+                let option1Label, option1Cost, option1Detail;
+                let option2Label, option2Cost, option2Detail;
+                let recommendation, analysis;
                 
                 if (direction === 'borrow_usd') {
-                  // B/S: 외화 빌리기
-                  // FX Swap 비용 vs MMDA 포기
-                  // impliedRate < 0이면 수익, > 0이면 비용
-                  // FX Swap 유리 조건: impliedRate < MMDA
-                  diff = usdMmda - impliedRate;
+                  // B/S: USD 필요 → KRW 담보로 USD 빌림
+                  // Option 1: FX Swap B/S
+                  //   - Swap 비용 (KRW 차이)
+                  //   - KRW 기회비용 (담보 묶임)
+                  const krwOpportunityCost = nearKrw * (krwMmda / 100) * (days / 365);
+                  const totalSwapCost = swapCostKrw + krwOpportunityCost;
+                  const swapAnnualized = (totalSwapCost / nearKrw) * (365 / days) * 100;
                   
-                  if (impliedRate < 0) {
+                  option1Label = 'FX Swap B/S';
+                  option1Cost = totalSwapCost;
+                  option1Detail = {
+                    swapCost: swapCostKrw,
+                    opportunityCost: krwOpportunityCost,
+                    annualized: swapAnnualized
+                  };
+                  
+                  // Option 2: USD MMDA 해지
+                  //   - USD 이자 포기
+                  const usdInterestForgone = pricingNotional * (usdMmda / 100) * (days / 365);
+                  const usdInterestForgoneKrw = usdInterestForgone * spot;
+                  
+                  option2Label = 'USD MMDA 해지';
+                  option2Cost = usdInterestForgoneKrw;
+                  option2Detail = {
+                    usdInterest: usdInterestForgone,
+                    krwEquivalent: usdInterestForgoneKrw,
+                    annualized: usdMmda
+                  };
+                  
+                  // 비교
+                  if (option1Cost < option2Cost) {
                     recommendation = 'swap';
-                    analysis = `FX Swap이 유리합니다. Swap으로 ${Math.abs(impliedRate).toFixed(2)}% 수익 + MMDA ${usdMmda}% 유지 = 총 ${(Math.abs(impliedRate) + usdMmda).toFixed(2)}%`;
-                  } else if (impliedRate < usdMmda) {
-                    recommendation = 'swap';
-                    analysis = `FX Swap이 유리합니다. Swap 비용 ${impliedRate.toFixed(2)}% < MMDA 수익 ${usdMmda}% (차이: ${diff.toFixed(2)}%p)`;
+                    analysis = `FX Swap이 ${formatNumber(option2Cost - option1Cost, 0)}원 유리. USD MMDA ${usdMmda}% 유지하면서 저렴하게 USD 조달`;
                   } else {
                     recommendation = 'mmda';
-                    analysis = `MMDA 해지가 유리합니다. Swap 비용 ${impliedRate.toFixed(2)}% > MMDA 수익 ${usdMmda}%`;
+                    analysis = `USD MMDA 해지가 ${formatNumber(option1Cost - option2Cost, 0)}원 유리. Swap 비용 + KRW 기회비용이 더 큼`;
                   }
-                } else {
-                  // S/B: 외화 빌려주기
-                  // FX Swap 수익 vs MMDA 수익
-                  // FX Swap 유리 조건: impliedRate > MMDA (수익이 더 높음)
-                  // 근데 S/B는 반대로... 
-                  // S/B에서 swap point가 음수면 손해 (더 비싸게 사야 함)
-                  const sbRate = -impliedRate; // S/B 관점에서 수익률
-                  diff = sbRate - usdMmda;
                   
-                  if (sbRate > usdMmda) {
+                } else {
+                  // S/B: KRW 필요 → USD 담보로 KRW 빌림
+                  // Option 1: FX Swap S/B
+                  //   - Swap 비용/수익 (KRW 차이, S/B면 부호 반대)
+                  //   - USD 기회비용 (담보 묶임)
+                  const usdOpportunityCost = pricingNotional * (usdMmda / 100) * (days / 365);
+                  const usdOpportunityCostKrw = usdOpportunityCost * spot;
+                  const sbSwapCost = -swapCostKrw; // S/B는 부호 반대
+                  const totalSwapCost = sbSwapCost + usdOpportunityCostKrw;
+                  const swapAnnualized = (totalSwapCost / nearKrw) * (365 / days) * 100;
+                  
+                  option1Label = 'FX Swap S/B';
+                  option1Cost = totalSwapCost;
+                  option1Detail = {
+                    swapCost: sbSwapCost,
+                    opportunityCost: usdOpportunityCostKrw,
+                    usdOpportunityCostRaw: usdOpportunityCost,
+                    annualized: swapAnnualized
+                  };
+                  
+                  // Option 2: KRW MMDA 해지
+                  //   - KRW 이자 포기
+                  const krwInterestForgone = nearKrw * (krwMmda / 100) * (days / 365);
+                  
+                  option2Label = 'KRW MMDA 해지';
+                  option2Cost = krwInterestForgone;
+                  option2Detail = {
+                    krwInterest: krwInterestForgone,
+                    annualized: krwMmda
+                  };
+                  
+                  // 비교
+                  if (option1Cost < option2Cost) {
                     recommendation = 'swap';
-                    analysis = `FX Swap이 유리합니다. Swap 수익 ${sbRate.toFixed(2)}% > MMDA ${usdMmda}% (차이: +${diff.toFixed(2)}%p)`;
+                    analysis = `FX Swap이 ${formatNumber(option2Cost - option1Cost, 0)}원 유리. KRW MMDA ${krwMmda}% 유지하면서 저렴하게 KRW 조달`;
                   } else {
                     recommendation = 'mmda';
-                    analysis = `MMDA가 유리합니다. MMDA ${usdMmda}% > Swap 수익 ${sbRate.toFixed(2)}% (차이: ${Math.abs(diff).toFixed(2)}%p)`;
+                    analysis = `KRW MMDA 해지가 ${formatNumber(option1Cost - option2Cost, 0)}원 유리. Swap 비용 + USD 기회비용이 더 큼`;
                   }
                 }
 
                 return (
                   <div className="space-y-4">
-                    {/* 계산 결과 */}
+                    {/* 두 옵션 비교 */}
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-kustody-navy/50 rounded-lg p-4">
-                        <div className="text-xs text-kustody-muted mb-1">FX Swap 내재금리</div>
-                        <div className={`font-mono text-xl font-semibold ${impliedRate < 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {impliedRate >= 0 ? '+' : ''}{impliedRate.toFixed(2)}%
+                      {/* Option 1: FX Swap */}
+                      <div className={`rounded-lg p-4 border ${recommendation === 'swap' ? 'bg-green-500/10 border-green-500/50' : 'bg-kustody-navy/50 border-kustody-border'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-semibold">{option1Label}</span>
+                          {recommendation === 'swap' && <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">추천</span>}
                         </div>
-                        <div className="text-xs text-kustody-muted mt-1">
-                          {direction === 'borrow_usd' 
-                            ? (impliedRate < 0 ? '원화 조달 수익' : '원화 조달 비용')
-                            : (impliedRate < 0 ? 'USD 운용 비용' : 'USD 운용 수익')}
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-kustody-muted">Swap 비용:</span>
+                            <span className={`font-mono ${option1Detail.swapCost >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                              {option1Detail.swapCost >= 0 ? '' : '+'}₩{formatNumber(Math.abs(option1Detail.swapCost), 0)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-kustody-muted">
+                              {direction === 'borrow_usd' ? 'KRW' : 'USD'} 기회비용:
+                            </span>
+                            <span className="font-mono text-red-400">
+                              ₩{formatNumber(option1Detail.opportunityCost, 0)}
+                              {direction === 'lend_usd' && <span className="text-xs text-kustody-muted ml-1">(${formatNumber(option1Detail.usdOpportunityCostRaw, 0)})</span>}
+                            </span>
+                          </div>
+                          <div className="border-t border-kustody-border pt-2 flex justify-between font-semibold">
+                            <span>합계:</span>
+                            <span className="font-mono text-red-400">₩{formatNumber(option1Cost, 0)}</span>
+                          </div>
+                          <div className="text-xs text-kustody-muted text-right">
+                            연율화: {option1Detail.annualized.toFixed(2)}%
+                          </div>
                         </div>
                       </div>
-                      <div className="bg-kustody-navy/50 rounded-lg p-4">
-                        <div className="text-xs text-kustody-muted mb-1">USD MMDA 금리</div>
-                        <div className="font-mono text-xl font-semibold text-blue-400">
-                          {usdMmda.toFixed(2)}%
+
+                      {/* Option 2: MMDA 해지 */}
+                      <div className={`rounded-lg p-4 border ${recommendation === 'mmda' ? 'bg-blue-500/10 border-blue-500/50' : 'bg-kustody-navy/50 border-kustody-border'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-semibold">{option2Label}</span>
+                          {recommendation === 'mmda' && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded">추천</span>}
                         </div>
-                        <div className="text-xs text-kustody-muted mt-1">
-                          연 ${formatNumber(mmdaEarning, 0)} 수익
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-kustody-muted">이자 포기:</span>
+                            <span className="font-mono text-red-400">
+                              {direction === 'borrow_usd' 
+                                ? `$${formatNumber(option2Detail.usdInterest, 0)}`
+                                : `₩${formatNumber(option2Detail.krwInterest, 0)}`}
+                            </span>
+                          </div>
+                          {direction === 'borrow_usd' && (
+                            <div className="flex justify-between">
+                              <span className="text-kustody-muted">원화 환산:</span>
+                              <span className="font-mono text-red-400">₩{formatNumber(option2Detail.krwEquivalent, 0)}</span>
+                            </div>
+                          )}
+                          <div className="border-t border-kustody-border pt-2 flex justify-between font-semibold">
+                            <span>합계:</span>
+                            <span className="font-mono text-red-400">₩{formatNumber(option2Cost, 0)}</span>
+                          </div>
+                          <div className="text-xs text-kustody-muted text-right">
+                            연율화: {option2Detail.annualized.toFixed(2)}%
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* 기간별 금액 비교 */}
-                    <div className="bg-kustody-dark/50 rounded-lg p-4">
-                      <div className="text-xs text-kustody-muted mb-2">{lastQuery.days}일 기준 비교 (USD {formatUsdKorean(pricingNotional)})</div>
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-kustody-muted">FX Swap P&L: </span>
-                          <span className={`font-mono ${swapPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            ₩{formatNumber(Math.abs(swapPnl), 0)} {swapPnl >= 0 ? '이득' : '손실'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-kustody-muted">MMDA 이자 ({lastQuery.days}일): </span>
-                          <span className="font-mono text-blue-400">
-                            ${formatNumber(mmdaPeriodEarning, 0)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 추천 */}
+                    {/* 결론 */}
                     <div className={`rounded-lg p-4 ${recommendation === 'swap' ? 'bg-green-500/10 border border-green-500/30' : 'bg-blue-500/10 border border-blue-500/30'}`}>
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-lg">{recommendation === 'swap' ? '🔄' : '🏦'}</span>
                         <span className={`font-semibold ${recommendation === 'swap' ? 'text-green-400' : 'text-blue-400'}`}>
-                          {recommendation === 'swap' ? 'FX Swap 추천' : 'MMDA 활용 추천'}
+                          {recommendation === 'swap' ? option1Label + ' 추천' : option2Label + ' 추천'}
                         </span>
                       </div>
                       <p className="text-sm text-kustody-muted">{analysis}</p>
+                    </div>
+
+                    {/* 계산 기준 */}
+                    <div className="text-xs text-kustody-muted bg-kustody-dark/30 rounded p-3">
+                      <div className="font-semibold mb-1">계산 기준</div>
+                      <div>• Notional: USD {formatUsdKorean(pricingNotional)} | 기간: {days}일</div>
+                      <div>• Near KRW: ₩{formatNumber(nearKrw, 0)} (Spot {formatNumber(spot, 2)})</div>
+                      <div>• Far KRW: ₩{formatNumber(farKrw, 0)} (Spot {swapPoint >= 0 ? '+' : ''}{swapPoint.toFixed(2)})</div>
                     </div>
                   </div>
                 );
