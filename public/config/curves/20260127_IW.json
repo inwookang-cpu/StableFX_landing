@@ -1,0 +1,79 @@
+{
+  "metadata": {
+    "referenceDate": "2026-01-27",
+    "createdBy": "IW",
+    "createdAt": "2026-01-27T18:00:00+09:00",
+    "version": "1.0",
+    "source": "IPS Corp API"
+  },
+
+  "spotRates": {
+    "USDKRW": 1450.00,
+    "USDJPY": 155.50,
+    "USDHKD": 7.7850,
+    "USDCHF": 0.9050,
+    "USDCNH": 7.2500,
+    "EURUSD": 1.0450,
+    "GBPUSD": 1.2450,
+    "AUDUSD": 0.6250
+  },
+
+  "curves": {
+    "USDKRW": {
+      "USD": {
+        "dayCount": 360,
+        "spotDate": "2026-01-29",
+        "tenors": [
+          {"tenor": "O/N", "maturity": "2026-01-28", "days": -1, "type": "CASH", "rate": 4.35},
+          {"tenor": "Spot", "maturity": "2026-01-29", "days": 0, "type": "CASH", "rate": 4.35},
+          {"tenor": "1W", "maturity": "2026-02-05", "days": 7, "type": "CASH", "rate": 4.35},
+          {"tenor": "1M", "maturity": "2026-02-27", "days": 29, "type": "CASH", "rate": 4.32},
+          {"tenor": "2M", "maturity": "2026-03-30", "days": 60, "type": "CASH", "rate": 4.30},
+          {"tenor": "3M", "maturity": "2026-04-29", "days": 90, "type": "CASH", "rate": 4.28},
+          {"tenor": "6M", "maturity": "2026-07-29", "days": 181, "type": "SWAP", "rate": 4.20},
+          {"tenor": "9M", "maturity": "2026-10-29", "days": 273, "type": "SWAP", "rate": 4.12},
+          {"tenor": "1Y", "maturity": "2027-01-29", "days": 365, "type": "SWAP", "rate": 4.05}
+        ]
+      },
+      "KRW": {
+        "dayCount": 365,
+        "spotDate": "2026-01-29",
+        "tenors": [
+          {"tenor": "O/N", "maturity": "2026-01-28", "days": -2, "type": "FX", "rate": 2.75},
+          {"tenor": "T/N", "maturity": "2026-01-29", "days": -1, "type": "FX", "rate": 2.75},
+          {"tenor": "Spot", "maturity": "2026-01-29", "days": 0, "type": "FX", "rate": 2.75},
+          {"tenor": "1W", "maturity": "2026-02-05", "days": 7, "type": "FX", "rate": 2.75},
+          {"tenor": "1M", "maturity": "2026-02-27", "days": 29, "type": "FX", "rate": 2.73},
+          {"tenor": "2M", "maturity": "2026-03-30", "days": 60, "type": "FX", "rate": 2.70},
+          {"tenor": "3M", "maturity": "2026-04-29", "days": 90, "type": "FX", "rate": 2.68},
+          {"tenor": "6M", "maturity": "2026-07-29", "days": 181, "type": "FX", "rate": 2.60},
+          {"tenor": "9M", "maturity": "2026-10-29", "days": 273, "type": "FX", "rate": 2.52},
+          {"tenor": "1Y", "maturity": "2027-01-29", "days": 365, "type": "FX", "rate": 2.45}
+        ]
+      },
+      "fxSwapPoints": [
+        {"tenor": "O/N", "start": "2026-01-27", "maturity": "2026-01-28", "days": -1, "points": -0.05, "bid": -0.05, "ask": -0.05},
+        {"tenor": "T/N", "start": "2026-01-28", "maturity": "2026-01-29", "days": 0, "points": -0.06, "bid": -0.06, "ask": -0.06},
+        {"tenor": "1W", "start": "2026-01-29", "maturity": "2026-02-05", "days": 7, "points": -0.44, "bid": -0.44, "ask": -0.44},
+        {"tenor": "1M", "start": "2026-01-29", "maturity": "2026-02-27", "days": 29, "points": -1.60, "bid": -1.60, "ask": -1.60},
+        {"tenor": "2M", "start": "2026-01-29", "maturity": "2026-03-30", "days": 60, "points": -3.30, "bid": -3.30, "ask": -3.30},
+        {"tenor": "3M", "start": "2026-01-29", "maturity": "2026-04-29", "days": 90, "points": -4.95, "bid": -4.95, "ask": -4.95},
+        {"tenor": "6M", "start": "2026-01-29", "maturity": "2026-07-29", "days": 181, "points": -9.90, "bid": -9.90, "ask": -9.90},
+        {"tenor": "9M", "start": "2026-01-29", "maturity": "2026-10-29", "days": 273, "points": -13.55, "bid": -13.55, "ask": -13.55},
+        {"tenor": "1Y", "start": "2026-01-29", "maturity": "2027-01-29", "days": 365, "points": -17.20, "bid": -17.20, "ask": -17.20}
+      ],
+      "impliedYield": []
+    }
+  },
+
+  "forwardSpreads": {
+    "USDKRW": [
+      {"spread": "1Wx1M", "nearTenor": "1W", "farTenor": "1M", "points": -1.16, "bid": -1.16, "ask": -1.16},
+      {"spread": "1x2", "nearTenor": "1M", "farTenor": "2M", "points": -1.70, "bid": -1.70, "ask": -1.70},
+      {"spread": "2x3", "nearTenor": "2M", "farTenor": "3M", "points": -1.65, "bid": -1.65, "ask": -1.65},
+      {"spread": "3x6", "nearTenor": "3M", "farTenor": "6M", "points": -4.95, "bid": -4.95, "ask": -4.95},
+      {"spread": "6x9", "nearTenor": "6M", "farTenor": "9M", "points": -3.65, "bid": -3.65, "ask": -3.65},
+      {"spread": "9x12", "nearTenor": "9M", "farTenor": "1Y", "points": -3.65, "bid": -3.65, "ask": -3.65}
+    ]
+  }
+}

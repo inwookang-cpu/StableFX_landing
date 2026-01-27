@@ -67,6 +67,9 @@ export default function Console() {
   const [activeTab, setActiveTab] = useState('calculator');
   const [holidays, setHolidays] = useState({ KR: [], US: [] });
   const [isLoaded, setIsLoaded] = useState(false);
+  
+  // Curves 탭에서 로드한 데이터를 Advisory와 공유
+  const [sharedCurveData, setSharedCurveData] = useState(null);
 
   // 금융결제원 은행코드
   const BANK_CODES = [
@@ -317,8 +320,10 @@ export default function Console() {
     { id: 'clientPricing', label: '💰 Client Pricing' },
     { id: 'advisory', label: '🎯 Advisory' },
     { id: 'blotter', label: '📋 Blotter' },
+    { id: 'cashBalance', label: '💰 Cash Balance' },
     { id: 'cashSchedule', label: '💵 Cash Schedule' },
     { id: 'valuation', label: '📊 Valuation' },
+    { id: 'accountingRates', label: '🏦 Accounting Rates' },
     { id: 'config', label: '⚙️ Settings' },
   ];
 
@@ -328,12 +333,13 @@ export default function Console() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <a href="/" className="w-8 h-8 rounded-lg bg-gradient-to-br from-kustody-accent to-kustody-accent-dim flex items-center justify-center text-kustody-dark font-bold text-sm hover:opacity-80 transition-opacity">K</a>
+              <a href="/" className="w-8 h-8 rounded-lg bg-gradient-to-br from-kustody-accent to-kustody-accent-dim flex items-center justify-center text-kustody-dark font-bold text-sm hover:opacity-80 transition-opacity">S</a>
               <div><h1 className="text-lg font-semibold text-kustody-text">FX Professional Console</h1><p className="text-xs text-kustody-muted">커브 관리 · 고객 설정 · 거래 기록 · 밸류에이션</p></div>
             </div>
-            <div className="flex items-center gap-4">
-              <a href="/" className="text-xs text-kustody-muted hover:text-kustody-accent transition-colors">← StableFX 홈</a>
-              <div className="text-xs text-kustody-muted font-mono">KustodyFi</div>
+            <div className="flex items-center gap-2">
+              <a href="/" className="px-3 py-1.5 text-xs text-kustody-muted hover:text-kustody-text hover:bg-kustody-navy/50 rounded-lg transition-all">🏠 About</a>
+              <a href="/" className="px-3 py-1.5 text-xs text-kustody-muted hover:text-kustody-text hover:bg-kustody-navy/50 rounded-lg transition-all">🧮 Calculator</a>
+              <span className="px-3 py-1.5 text-xs bg-kustody-accent/10 text-kustody-accent rounded-lg">🚀 Console</span>
             </div>
           </div>
         </div>
@@ -367,7 +373,7 @@ export default function Console() {
                 setSelectedClientId={setSelectedClientId}
               />
             )}
-            {activeTab === 'curves' && <CurvesTab />}
+            {activeTab === 'curves' && <CurvesTab onCurveDataChange={setSharedCurveData} />}
             {activeTab === 'clients' && (
               <ClientsTab 
                 config={companyConfig}
@@ -400,6 +406,7 @@ export default function Console() {
                 setSelectedClientId={setSelectedClientId}
                 pricingNotional={pricingNotional}
                 setPricingNotional={setPricingNotional}
+                sharedCurveData={sharedCurveData}
               />
             )}
             {activeTab === 'blotter' && (
@@ -407,6 +414,14 @@ export default function Console() {
                 blotter={blotter}
                 config={companyConfig}
                 deleteTrade={deleteTrade}
+                selectedClientId={selectedClientId}
+                setSelectedClientId={setSelectedClientId}
+              />
+            )}
+            {activeTab === 'cashBalance' && (
+              <CashBalanceTab 
+                blotter={blotter}
+                config={companyConfig}
                 selectedClientId={selectedClientId}
                 setSelectedClientId={setSelectedClientId}
               />
@@ -425,6 +440,9 @@ export default function Console() {
                 fixingRate={fixingRate}
                 setFixingRate={setFixingRate}
               />
+            )}
+            {activeTab === 'accountingRates' && (
+              <AccountingRatesTab />
             )}
           </>
         )}
@@ -724,7 +742,23 @@ function ConfigRow({ label, value }) {
 // Curves Tab with Interpolation - Excel Style
 // ============================================================
 
-function CurvesTab() {
+// 통화별 소수점 포맷팅
+const formatSpotRate = (pair, rate) => {
+  if (rate === null || rate === undefined || isNaN(rate)) return '-';
+  if (pair === 'USDKRW' || pair === 'USDJPY') {
+    return rate.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  }
+  return rate.toFixed(5);
+};
+
+// 네이버 환율 캐시 (전역)
+let naverRateCache = {
+  data: null,
+  lastFetch: null,
+  CACHE_DURATION: 4 * 60 * 1000 // 4분
+};
+
+function CurvesTab({ onCurveDataChange }) {
   const [curveData, setCurveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedCcy, setSelectedCcy] = useState('USD');
@@ -736,10 +770,465 @@ function CurvesTab() {
   const [askOverrides, setAskOverrides] = useState({});
   
   // Interpolation state
-  const [interpDate, setInterpDate] = useState('2020-04-06'); // Maturity (1M)
-  const [interpStartDate, setInterpStartDate] = useState('2020-03-04'); // Start (Spot)
+  const [interpDate, setInterpDate] = useState('2026-02-27'); // Maturity (1M)
+  const [interpStartDate, setInterpStartDate] = useState('2026-01-29'); // Start (Spot)
   const [interpMethod, setInterpMethod] = useState('swap_point_linear');
   const [viewMode, setViewMode] = useState('pro'); // 'beginner' or 'pro'
+  
+  // Supabase 연동 state
+  const [dataLoading, setDataLoading] = useState(false);
+  const [ipsDate, setIpsDate] = useState('2026-01-27');
+  const [ipsSpotDate, setIpsSpotDate] = useState('2026-01-29');
+  
+  // 네이버 환율 state
+  const [naverRates, setNaverRates] = useState(null);
+  const [naverLoading, setNaverLoading] = useState(false);
+  const [naverLastUpdate, setNaverLastUpdate] = useState(null);
+  
+  // Market 실시간 state
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketLastUpdate, setMarketLastUpdate] = useState(null);
+  
+  // Spread settings (DB에서 가져옴)
+  const [spreadSettings, setSpreadSettings] = useState({});
+  
+  // Supabase 설정
+  const SUPABASE_URL = 'https://dxenbwvhxdcgtdivjhpa.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_jmXQn-qfWdQ6XNOW9preiQ_bHgXbHxO';
+  
+  // Market 캐시 (30분)
+  const MARKET_CACHE_DURATION = 30 * 60 * 1000;
+  
+  // curveData 변경 시 부모에게 전달 (Advisory 탭과 공유)
+  useEffect(() => {
+    if (curveData && onCurveDataChange) {
+      onCurveDataChange(curveData);
+    }
+  }, [curveData, onCurveDataChange]);
+  
+  // Spread settings 가져오기
+  // 기본 spread 설정 (DB에 없을 경우 fallback)
+  // spread_pips = 한쪽 spread (bid = mid - spread, ask = mid + spread)
+  const DEFAULT_SPREADS = {
+    'O/N': 1.5, 'T/N': 1.5, '1W': 4,
+    '1M': 10, '2M': 20, '3M': 30,
+    '6M': 40, '9M': 60, '1Y': 80
+  };
+  
+  const fetchSpreadSettings = async () => {
+    try {
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/spread_settings?select=*`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          const settings = {};
+          data.forEach(row => {
+            const tenorName = row.tenor === 'ON' ? 'O/N' : row.tenor === 'TN' ? 'T/N' : row.tenor;
+            settings[tenorName] = row.spread_pips || 0;
+          });
+          setSpreadSettings(settings);
+          return settings;
+        }
+      }
+    } catch (error) {
+      console.error('Spread settings fetch error:', error);
+    }
+    // DB에 데이터 없으면 기본값 사용
+    console.log('Using default spread settings');
+    setSpreadSettings(DEFAULT_SPREADS);
+    return DEFAULT_SPREADS;
+  };
+  
+  // mid에 spread 적용해서 bid/ask 계산
+  const applySpreadToSwapPoints = (swapPoints, spreads) => {
+    return swapPoints.map(sp => {
+      const spreadPips = spreads[sp.tenor] || 0;
+      const spreadValue = spreadPips / 100; // pips를 원 단위로 변환
+      return {
+        ...sp,
+        bid: sp.points - spreadValue,
+        ask: sp.points + spreadValue
+      };
+    });
+  };
+  
+  // Market에서 스왑포인트 가져오기 + DB 저장
+  const fetchMarketSwapPoints = async (force = false) => {
+    setMarketLoading(true);
+    
+    try {
+      // 1. DB에서 최신 데이터 시간 확인
+      if (!force) {
+        const checkResponse = await fetch(
+          `${SUPABASE_URL}/rest/v1/fx_swap_points?select=updated_at&order=updated_at.desc&limit=1`,
+          {
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            }
+          }
+        );
+        
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json();
+          if (checkData.length > 0) {
+            const lastUpdate = new Date(checkData[0].updated_at);
+            const now = new Date();
+            const diffMinutes = (now - lastUpdate) / 1000 / 60;
+            
+            if (diffMinutes < 30) {
+              console.log(`DB 캐시 사용 (${Math.round(diffMinutes)}분 전 데이터)`);
+              // DB에서 가져오기
+              await fetchCurveData();
+              setMarketLastUpdate(lastUpdate);
+              setMarketLoading(false);
+              return;
+            }
+          }
+        }
+      }
+      
+      // 2. Market에서 새로 가져오기
+      console.log('Market 데이터 수집 중...');
+      const response = await fetch('https://www.ips-corp.co.kr/ajax/site/market/broker_data.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'market_gb=FX_SWAP'
+      });
+      
+      if (!response.ok) {
+        throw new Error('Market API 오류');
+      }
+      
+      const data = await response.json();
+      
+      if (!data.broker || data.broker.length === 0) {
+        throw new Error('Market 데이터 없음');
+      }
+      
+      // 3. 테너 매핑 및 파싱
+      const tenorMap = [
+        { tenor: 'ON', days: -1 },
+        { tenor: 'TN', days: 0 },
+        { tenor: '1W', days: 7 },
+        { tenor: '2W', days: 14 },
+        { tenor: '1M', days: 30 },
+        { tenor: '2M', days: 60 },
+        { tenor: '3M', days: 90 },
+        { tenor: '6M', days: 180 },
+        { tenor: '9M', days: 270 },
+        { tenor: '1Y', days: 365 },
+      ];
+      
+      const today = new Date().toISOString().split('T')[0];
+      const spotDate = new Date();
+      spotDate.setDate(spotDate.getDate() + 2);
+      while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
+        spotDate.setDate(spotDate.getDate() + 1);
+      }
+      const spotDateStr = spotDate.toISOString().split('T')[0];
+      
+      const swapPoints = [];
+      
+      for (let i = 0; i < Math.min(data.broker.length, tenorMap.length); i++) {
+        const row = data.broker[i];
+        const { tenor, days } = tenorMap[i];
+        
+        const mid = parseFloat(row.mid) || null;
+        const bid = parseFloat(row.bid) || null;
+        const ask = parseFloat(row.ask) || null;
+        
+        if (mid !== null) {
+          swapPoints.push({
+            reference_date: today,
+            spot_date: spotDateStr,
+            tenor: tenor,
+            days: days,
+            mid_points: mid,
+            bid_points: bid,
+            ask_points: ask,
+            source: 'MARKET'
+          });
+        }
+      }
+      
+      // 4. DB에 저장 (upsert)
+      for (const sp of swapPoints) {
+        await fetch(`${SUPABASE_URL}/rest/v1/fx_swap_points`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(sp)
+        });
+      }
+      
+      console.log(`✅ ${swapPoints.length}개 스왑포인트 DB 저장 완료`);
+      
+      // 5. Spread settings 가져오기
+      const spreads = await fetchSpreadSettings();
+      
+      // 6. curveData 업데이트 (spread 적용)
+      if (curveData) {
+        const newData = JSON.parse(JSON.stringify(curveData));
+        
+        newData.metadata.referenceDate = today;
+        if (newData.curves?.USDKRW?.USD) {
+          newData.curves.USDKRW.USD.spotDate = spotDateStr;
+        }
+        if (newData.curves?.USDKRW?.KRW) {
+          newData.curves.USDKRW.KRW.spotDate = spotDateStr;
+        }
+        
+        // fxSwapPoints 업데이트 (spread 적용)
+        const tenorNameMap = { 'ON': 'O/N', 'TN': 'T/N' };
+        newData.curves.USDKRW.fxSwapPoints = newData.curves.USDKRW.fxSwapPoints.map(sp => {
+          const marketData = swapPoints.find(d => 
+            (tenorNameMap[d.tenor] || d.tenor) === sp.tenor
+          );
+          if (marketData) {
+            const mid = marketData.mid_points;
+            const spreadPips = spreads[sp.tenor] || 0;
+            const spreadValue = spreadPips / 100;
+            return {
+              ...sp,
+              points: mid,
+              bid: mid - spreadValue,
+              ask: mid + spreadValue
+            };
+          }
+          return sp;
+        });
+        
+        setCurveData(newData);
+        setInterpStartDate(spotDateStr);
+      }
+      
+      setMarketLastUpdate(new Date());
+      alert('✅ Market 데이터 갱신 완료!');
+      
+    } catch (error) {
+      console.error('Market fetch error:', error);
+      alert('❌ Market 연결 실패: ' + error.message);
+    } finally {
+      setMarketLoading(false);
+    }
+  };
+  
+  // 네이버 환율 가져오기 - Supabase 우선, fallback으로 API route
+  const fetchNaverRates = async (force = false) => {
+    const now = Date.now();
+    
+    // 캐시 유효성 체크 (4분)
+    if (!force && naverRateCache.data && naverRateCache.lastFetch && 
+        (now - naverRateCache.lastFetch) < naverRateCache.CACHE_DURATION) {
+      setNaverRates(naverRateCache.data);
+      setNaverLastUpdate(new Date(naverRateCache.lastFetch));
+      return naverRateCache.data;
+    }
+    
+    setNaverLoading(true);
+    try {
+      // 1. Supabase에서 먼저 조회 (GitHub Actions가 15분마다 업데이트)
+      const today = new Date().toISOString().split('T')[0];
+      const supabaseResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&source=eq.naver&reference_date=eq.${today}&select=*&order=fetched_at.desc&limit=1`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (supabaseResponse.ok) {
+        const supabaseData = await supabaseResponse.json();
+        
+        if (supabaseData && supabaseData.length > 0) {
+          const record = supabaseData[0];
+          const fetchedAt = new Date(record.fetched_at);
+          const ageMinutes = (now - fetchedAt.getTime()) / (1000 * 60);
+          
+          // 15분 이내 데이터면 사용
+          if (ageMinutes < 20) {
+            const rates = {
+              USDKRW: parseFloat(record.rate),
+              change: parseFloat(record.change) || 0,
+              changePercent: parseFloat(record.change_percent) || 0,
+              source: 'supabase'
+            };
+            
+            naverRateCache.data = rates;
+            naverRateCache.lastFetch = now;
+            
+            setNaverRates(rates);
+            setNaverLastUpdate(fetchedAt);
+            console.log('✅ Spot rate from Supabase:', rates.USDKRW, `(${Math.round(ageMinutes)}분 전)`);
+            
+            return rates;
+          }
+        }
+      }
+      
+      // 2. Supabase에 없으면 내부 API route 호출 (fallback)
+      console.log('📡 Supabase에 데이터 없음, API route 호출...');
+      const response = await fetch('/api/naver-rates');
+      
+      if (!response.ok) {
+        throw new Error('API 오류');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.rates) {
+        const rates = result.rates;
+        
+        // 캐시 업데이트
+        naverRateCache.data = rates;
+        naverRateCache.lastFetch = now;
+        
+        setNaverRates(rates);
+        setNaverLastUpdate(new Date(now));
+        
+        return rates;
+      } else {
+        throw new Error(result.error || '데이터 없음');
+      }
+    } catch (error) {
+      console.error('Naver rates fetch error:', error);
+      // 에러 시 조용히 실패 (alert 제거)
+      console.warn('⚠️ 환율 조회 실패, 기본값 사용');
+      return null;
+    } finally {
+      setNaverLoading(false);
+    }
+  };
+  
+  // 네이버 환율을 curveData에 적용
+  const applyNaverRates = async () => {
+    const rates = await fetchNaverRates(true);
+    if (rates && curveData) {
+      const newData = JSON.parse(JSON.stringify(curveData));
+      
+      // spotRates 업데이트
+      Object.keys(newData.spotRates).forEach(pair => {
+        if (rates[pair] !== undefined) {
+          newData.spotRates[pair] = rates[pair];
+        }
+      });
+      
+      setCurveData(newData);
+    }
+  };
+  
+  // Supabase에서 커브 데이터 가져오기
+  const fetchCurveData = async () => {
+    setDataLoading(true);
+    try {
+      // 1. Spread settings 먼저 가져오기
+      const spreads = await fetchSpreadSettings();
+      
+      // 2. Supabase REST API 호출
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/latest_fx_curve?select=*`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error('데이터를 가져올 수 없습니다');
+      }
+      
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        // curveData 업데이트
+        const newData = JSON.parse(JSON.stringify(originalData));
+        
+        // Spot date 업데이트
+        const spotDate = data[0]?.spot_date;
+        if (spotDate && newData.curves?.USDKRW?.USD) {
+          newData.curves.USDKRW.USD.spotDate = spotDate;
+        }
+        if (spotDate && newData.curves?.USDKRW?.KRW) {
+          newData.curves.USDKRW.KRW.spotDate = spotDate;
+        }
+        
+        // metadata 업데이트
+        const refDate = data[0]?.reference_date;
+        if (refDate) {
+          newData.metadata.referenceDate = refDate;
+        }
+        
+        // fxSwapPoints 업데이트 (spread 적용)
+        if (newData.curves?.USDKRW?.fxSwapPoints) {
+          const tenorMap = {
+            'ON': 'O/N', 'TN': 'T/N',
+            '1W': '1W', '2W': '2W', '3W': '3W',
+            '1M': '1M', '2M': '2M', '3M': '3M',
+            '4M': '4M', '5M': '5M', '6M': '6M',
+            '7M': '7M', '8M': '8M', '9M': '9M',
+            '10M': '10M', '11M': '11M', '1Y': '1Y'
+          };
+          
+          newData.curves.USDKRW.fxSwapPoints = newData.curves.USDKRW.fxSwapPoints.map(sp => {
+            const dbRow = data.find(d => tenorMap[d.tenor] === sp.tenor || d.tenor === sp.tenor);
+            if (dbRow) {
+              const mid = dbRow.mid_points;
+              const spreadPips = spreads[sp.tenor] || 0;
+              const spreadValue = spreadPips / 100; // pips를 원 단위로 변환
+              return {
+                ...sp,
+                points: mid,
+                bid: mid - spreadValue,
+                ask: mid + spreadValue,
+                days: dbRow.days
+              };
+            }
+            return sp;
+          });
+        }
+        
+        setOriginalData(newData);
+        setCurveData(newData);
+        
+        // Interpolation 날짜 업데이트
+        if (data[0]?.spot_date) {
+          setInterpStartDate(data[0].spot_date);
+          const oneMonthLater = new Date(data[0].spot_date);
+          oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+          setInterpDate(oneMonthLater.toISOString().split('T')[0]);
+        }
+        
+        alert('✅ 데이터 로드 완료!');
+      } else {
+        alert('⚠️ 데이터가 없습니다. 먼저 data-collector를 실행하세요.');
+      }
+    } catch (error) {
+      console.error('Supabase fetch error:', error);
+      alert('❌ 데이터 로드 실패: ' + error.message);
+    } finally {
+      setDataLoading(false);
+    }
+  };
 
   // ============================================================
   // USD Bootstrapping: Rate → DF 계산
@@ -1032,49 +1521,73 @@ function CurvesTab() {
   }, [rateOverrides, overrides, bidOverrides, askOverrides, originalData]);
 
   useEffect(() => {
-    fetch('/config/curves/20200302_IW.json')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data) {
-          setOriginalData(data);
-          
-          // 초기 로드 시에도 Bootstrap 실행 (FX Swap Points 기준 KRW DF 계산)
-          if (data.curves?.USDKRW) {
-            const spot = data.spotRates?.USDKRW;
-            const fxSwapPoints = data.curves.USDKRW.fxSwapPoints;
-            
-            // 1. USD Bootstrap
-            data.curves.USDKRW.USD = bootstrapUSD(data.curves.USDKRW.USD);
-            
-            // 2. KRW Bootstrap (FX Swap Points 기준)
-            data.curves.USDKRW.KRW = bootstrapKRW(
-              data.curves.USDKRW.KRW,
-              data.curves.USDKRW.USD,
-              fxSwapPoints,
-              spot
-            );
-            
-            // 3. Forward Spreads에 Near/Far Bid/Ask 정보 추가 (Tight 계산용)
-            if (data.forwardSpreads?.USDKRW && fxSwapPoints) {
-              data.forwardSpreads.USDKRW = data.forwardSpreads.USDKRW.map(s => {
-                const nearSp = fxSwapPoints.find(sp => sp.tenor === s.nearTenor);
-                const farSp = fxSwapPoints.find(sp => sp.tenor === s.farTenor);
-                return {
-                  ...s,
-                  nearBid: nearSp?.bid ?? null,
-                  nearAsk: nearSp?.ask ?? null,
-                  farBid: farSp?.bid ?? null,
-                  farAsk: farSp?.ask ?? null
-                };
-              });
-            }
-          }
-          
-          setCurveData(data);
+    const loadInitialData = async () => {
+      // 1. JSON 로드
+      const res = await fetch('/config/curves/20260127_IW.json');
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      if (!data) return;
+      
+      // 2. Spread 설정 가져오기
+      const spreads = await fetchSpreadSettings();
+      
+      // 3. fxSwapPoints에 spread 적용
+      if (data.curves?.USDKRW?.fxSwapPoints) {
+        data.curves.USDKRW.fxSwapPoints = data.curves.USDKRW.fxSwapPoints.map(sp => {
+          const spreadPips = spreads[sp.tenor] || 0;
+          const spreadValue = spreadPips / 100;
+          return {
+            ...sp,
+            bid: sp.points - spreadValue,
+            ask: sp.points + spreadValue
+          };
+        });
+      }
+      
+      setOriginalData(data);
+      
+      // Market 날짜 초기화
+      setIpsDate(data.metadata?.referenceDate || '2026-01-27');
+      setIpsSpotDate(data.curves?.USDKRW?.USD?.spotDate || '2026-01-29');
+      
+      // 초기 로드 시에도 Bootstrap 실행 (FX Swap Points 기준 KRW DF 계산)
+      if (data.curves?.USDKRW) {
+        const spot = data.spotRates?.USDKRW;
+        const fxSwapPoints = data.curves.USDKRW.fxSwapPoints;
+        
+        // 1. USD Bootstrap
+        data.curves.USDKRW.USD = bootstrapUSD(data.curves.USDKRW.USD);
+        
+        // 2. KRW Bootstrap (FX Swap Points 기준)
+        data.curves.USDKRW.KRW = bootstrapKRW(
+          data.curves.USDKRW.KRW,
+          data.curves.USDKRW.USD,
+          fxSwapPoints,
+          spot
+        );
+        
+        // 3. Forward Spreads에 Near/Far Bid/Ask 정보 추가 (Tight 계산용)
+        if (data.forwardSpreads?.USDKRW && fxSwapPoints) {
+          data.forwardSpreads.USDKRW = data.forwardSpreads.USDKRW.map(s => {
+            const nearSp = fxSwapPoints.find(sp => sp.tenor === s.nearTenor);
+            const farSp = fxSwapPoints.find(sp => sp.tenor === s.farTenor);
+            return {
+              ...s,
+              nearBid: nearSp?.bid ?? null,
+              nearAsk: nearSp?.ask ?? null,
+              farBid: farSp?.bid ?? null,
+              farAsk: farSp?.ask ?? null
+            };
+          });
         }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      }
+          
+      setCurveData(data);
+      setLoading(false);
+    };
+    
+    loadInitialData();
   }, []);
 
   // Swap Point Linear Interpolation
@@ -1447,7 +1960,33 @@ function CurvesTab() {
             {usdkrw?.USD?.lastBootstrap && <span className="ml-2 text-kustody-accent">| Bootstrapped</span>}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* DB에서 데이터 로드 */}
+          <div className="flex items-center gap-1 bg-kustody-surface rounded-lg p-1">
+            <button
+              onClick={fetchCurveData}
+              disabled={dataLoading}
+              className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                dataLoading
+                  ? 'bg-green-500/50 text-white cursor-wait'
+                  : 'bg-green-500 text-white hover:bg-green-400'
+              }`}
+            >
+              {dataLoading ? '⏳' : '🔄 Load DB'}
+            </button>
+            <button
+              onClick={() => fetchMarketSwapPoints(true)}
+              disabled={marketLoading}
+              className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                marketLoading
+                  ? 'bg-blue-500/50 text-white cursor-wait'
+                  : 'bg-blue-500 text-white hover:bg-blue-400'
+              }`}
+              title={marketLastUpdate ? `최근: ${marketLastUpdate.toLocaleTimeString('ko-KR')}` : '30분 캐싱'}
+            >
+              {marketLoading ? '⏳' : '📡 Market'}
+            </button>
+          </div>
           <button 
             onClick={rebuildCurves}
             disabled={rebuilding}
@@ -1471,14 +2010,34 @@ function CurvesTab() {
       {/* Spot Rates - 엑셀 스타일 */}
       <div className="bg-kustody-surface rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold">💱 Spot Rates</h3>
-          <span className="text-xs text-kustody-muted">{curveData.metadata.referenceDate}</span>
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold">💱 Spot Rates</h3>
+            <button
+              onClick={applyNaverRates}
+              disabled={naverLoading}
+              className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                naverLoading
+                  ? 'bg-orange-500/50 text-white cursor-wait'
+                  : 'bg-orange-500 text-white hover:bg-orange-400'
+              }`}
+            >
+              {naverLoading ? '⏳' : '📡 네이버'}
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            {naverLastUpdate && (
+              <span className="text-xs text-kustody-muted">
+                Last: {naverLastUpdate.toLocaleTimeString('ko-KR')}
+              </span>
+            )}
+            <span className="text-xs text-kustody-muted">{curveData.metadata.referenceDate}</span>
+          </div>
         </div>
         <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
           {Object.entries(curveData.spotRates).map(([pair, rate]) => (
             <div key={pair} className="text-center">
               <div className="text-xs text-kustody-muted mb-1">{pair}</div>
-              <div className="font-mono font-semibold text-kustody-accent">{rate}</div>
+              <div className="font-mono font-semibold text-kustody-accent">{formatSpotRate(pair, rate)}</div>
             </div>
           ))}
         </div>
@@ -1642,7 +2201,7 @@ function CurvesTab() {
                 <div className="bg-kustody-navy/50 rounded-lg p-2 flex items-center justify-around">
                   <div className="text-center">
                     <div className="text-xs text-kustody-muted">Screen</div>
-                    <div className="font-mono text-kustody-accent font-semibold">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                    <div className="font-mono text-kustody-accent font-semibold">{interpResult.points !== null ? (interpResult.points * 100).toFixed(2) : '-'}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-xs text-kustody-muted">{interpResult.displayDays}D</div>
@@ -1676,15 +2235,15 @@ function CurvesTab() {
                     </div>
                     <div>
                       <div className="text-xs text-kustody-muted">Mid</div>
-                      <div className="font-mono text-kustody-text">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                      <div className="font-mono text-kustody-text">{interpResult.points !== null ? (interpResult.points * 100).toFixed(2) : '-'}</div>
                     </div>
                     <div>
                       <div className="text-xs text-kustody-muted">Bid</div>
                       {/* Spot 이전: Swap Ask가 Outright Bid가 됨 */}
                       <div className="font-mono text-red-400">
                         {interpResult.days < 0 
-                          ? (interpResult.ask !== null ? Math.round(interpResult.ask * 100) : '-')
-                          : (interpResult.bid !== null ? Math.round(interpResult.bid * 100) : '-')}
+                          ? (interpResult.ask !== null ? (interpResult.ask * 100).toFixed(2) : '-')
+                          : (interpResult.bid !== null ? (interpResult.bid * 100).toFixed(2) : '-')}
                       </div>
                     </div>
                     <div>
@@ -1692,8 +2251,8 @@ function CurvesTab() {
                       {/* Spot 이전: Swap Bid가 Outright Ask가 됨 */}
                       <div className="font-mono text-green-400">
                         {interpResult.days < 0 
-                          ? (interpResult.bid !== null ? Math.round(interpResult.bid * 100) : '-')
-                          : (interpResult.ask !== null ? Math.round(interpResult.ask * 100) : '-')}
+                          ? (interpResult.bid !== null ? (interpResult.bid * 100).toFixed(2) : '-')
+                          : (interpResult.ask !== null ? (interpResult.ask * 100).toFixed(2) : '-')}
                       </div>
                     </div>
                   </div>
@@ -1715,19 +2274,19 @@ function CurvesTab() {
                       </div>
                       <div>
                         <div className="text-xs text-kustody-muted">Mid</div>
-                        <div className="font-mono text-kustody-text">{interpResult.points !== null ? Math.round(interpResult.points * 100) : '-'}</div>
+                        <div className="font-mono text-kustody-text">{interpResult.points !== null ? (interpResult.points * 100).toFixed(2) : '-'}</div>
                       </div>
                       <div>
                         <div className="text-xs text-kustody-muted">Bid</div>
-                        <div className="font-mono text-red-400">{interpResult.tightBid !== null ? Math.round(interpResult.tightBid * 100) : '-'}</div>
+                        <div className="font-mono text-red-400">{interpResult.tightBid !== null ? (interpResult.tightBid * 100).toFixed(2) : '-'}</div>
                       </div>
                       <div>
                         <div className="text-xs text-kustody-muted">Ask</div>
-                        <div className="font-mono text-green-400">{interpResult.tightAsk !== null ? Math.round(interpResult.tightAsk * 100) : '-'}</div>
+                        <div className="font-mono text-green-400">{interpResult.tightAsk !== null ? (interpResult.tightAsk * 100).toFixed(2) : '-'}</div>
                       </div>
                       <div>
                         <div className="text-xs text-kustody-muted">Spread</div>
-                        <div className="font-mono text-kustody-accent">{interpResult.tightAsk !== null && interpResult.tightBid !== null ? Math.round((interpResult.tightAsk - interpResult.tightBid) * 100) : '-'}</div>
+                        <div className="font-mono text-kustody-accent">{interpResult.tightAsk !== null && interpResult.tightBid !== null ? ((interpResult.tightAsk - interpResult.tightBid) * 100).toFixed(2) : '-'}</div>
                       </div>
                     </div>
                     
@@ -1735,15 +2294,15 @@ function CurvesTab() {
                     <div className="mt-2 pt-2 border-t border-kustody-border/30 grid grid-cols-2 gap-2 text-center text-xs">
                       <div>
                         <span className="text-kustody-muted">Start ({interpResult.startDays}D): </span>
-                        <span className="font-mono">{interpResult.startPoints !== null ? Math.round(interpResult.startPoints * 100) : '-'}</span>
-                        <span className="text-red-400/70 ml-1">B:{interpResult.startBid !== null ? Math.round(interpResult.startBid * 100) : '-'}</span>
-                        <span className="text-green-400/70 ml-1">A:{interpResult.startAsk !== null ? Math.round(interpResult.startAsk * 100) : '-'}</span>
+                        <span className="font-mono">{interpResult.startPoints !== null ? (interpResult.startPoints * 100).toFixed(2) : '-'}</span>
+                        <span className="text-red-400/70 ml-1">B:{interpResult.startBid !== null ? (interpResult.startBid * 100).toFixed(2) : '-'}</span>
+                        <span className="text-green-400/70 ml-1">A:{interpResult.startAsk !== null ? (interpResult.startAsk * 100).toFixed(2) : '-'}</span>
                       </div>
                       <div>
                         <span className="text-kustody-muted">Maturity ({interpResult.maturityDays}D): </span>
-                        <span className="font-mono">{interpResult.maturityPoints !== null ? Math.round(interpResult.maturityPoints * 100) : '-'}</span>
-                        <span className="text-red-400/70 ml-1">B:{interpResult.maturityBid !== null ? Math.round(interpResult.maturityBid * 100) : '-'}</span>
-                        <span className="text-green-400/70 ml-1">A:{interpResult.maturityAsk !== null ? Math.round(interpResult.maturityAsk * 100) : '-'}</span>
+                        <span className="font-mono">{interpResult.maturityPoints !== null ? (interpResult.maturityPoints * 100).toFixed(2) : '-'}</span>
+                        <span className="text-red-400/70 ml-1">B:{interpResult.maturityBid !== null ? (interpResult.maturityBid * 100).toFixed(2) : '-'}</span>
+                        <span className="text-green-400/70 ml-1">A:{interpResult.maturityAsk !== null ? (interpResult.maturityAsk * 100).toFixed(2) : '-'}</span>
                       </div>
                     </div>
                   </div>
@@ -2267,31 +2826,146 @@ function ClientPricingTab({ config, selectedClientId, setSelectedClientId, prici
   const [viewMode, setViewMode] = useState('beginner');
   const [interpDate, setInterpDate] = useState('2020-04-06');
   const [interpStartDate, setInterpStartDate] = useState('2020-03-04');
+  
+  // 네이버 환율 state
+  const [liveSpot, setLiveSpot] = useState(null);
+  const [naverLoading, setNaverLoading] = useState(false);
+  const [naverLastUpdate, setNaverLastUpdate] = useState(null);
+
+  // 네이버 환율 가져오기 (4분 캐싱)
+  const fetchNaverSpot = async (force = false) => {
+    const now = Date.now();
+    
+    // 전역 캐시 체크
+    if (!force && naverRateCache.data && naverRateCache.lastFetch && 
+        (now - naverRateCache.lastFetch) < naverRateCache.CACHE_DURATION) {
+      if (naverRateCache.data.USDKRW) {
+        setLiveSpot(naverRateCache.data.USDKRW);
+        setNaverLastUpdate(new Date(naverRateCache.lastFetch));
+      }
+      return naverRateCache.data.USDKRW;
+    }
+    
+    setNaverLoading(true);
+    try {
+      const response = await fetch('/api/naver-rates', {
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.rates?.USDKRW) {
+          const rate = data.rates.USDKRW;
+          setLiveSpot(rate);
+          setNaverLastUpdate(new Date(now));
+          
+          // 전역 캐시 업데이트
+          naverRateCache.data = data.rates;
+          
+          naverRateCache.lastFetch = now;
+          
+          return rate;
+        }
+      }
+    } catch (error) {
+      console.error('Naver spot fetch error:', error);
+    } finally {
+      setNaverLoading(false);
+    }
+    return null;
+  };
+
+  // Supabase 설정
+  const SUPABASE_URL = 'https://dxenbwvhxdcgtdivjhpa.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_jmXQn-qfWdQ6XNOW9preiQ_bHgXbHxO';
+  
+  // 기본 spread 설정 (DB에 없을 경우 fallback)
+  // spread_pips = 한쪽 spread (bid = mid - spread, ask = mid + spread)
+  const DEFAULT_SPREADS = {
+    'O/N': 1.5, 'T/N': 1.5, '1W': 4,
+    '1M': 10, '2M': 20, '3M': 30,
+    '6M': 40, '9M': 60, '1Y': 80
+  };
+  
+  // Spread settings 가져오기
+  const fetchSpreadSettings = async () => {
+    try {
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/spread_settings?select=*`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          const settings = {};
+          data.forEach(row => {
+            const tenorName = row.tenor === 'ON' ? 'O/N' : row.tenor === 'TN' ? 'T/N' : row.tenor;
+            settings[tenorName] = row.spread_pips || 0;
+          });
+          return settings;
+        }
+      }
+    } catch (error) {
+      console.error('Spread settings fetch error:', error);
+    }
+    return DEFAULT_SPREADS;
+  };
 
   // Curve 데이터 로드
   useEffect(() => {
-    fetch('/config/curves/20200302_IW.json')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data) {
-          // Spot Date 기준으로 기본 날짜 설정
-          const spotDate = data.curves?.USDKRW?.USD?.spotDate;
-          if (spotDate) {
-            setInterpStartDate(spotDate);
-            // 1M 후 날짜
-            const maturity = new Date(spotDate);
-            maturity.setMonth(maturity.getMonth() + 1);
-            setInterpDate(maturity.toISOString().split('T')[0]);
-          }
-          setCurveData(data);
+    const loadData = async () => {
+      try {
+        // 1. JSON 로드
+        const res = await fetch('/config/curves/20260127_IW.json');
+        if (!res.ok) {
+          setLoading(false);
+          return;
         }
+        const data = await res.json();
+        
+        // 2. Spread settings 가져오기
+        const spreads = await fetchSpreadSettings();
+        
+        // 3. fxSwapPoints에 spread 적용
+        if (data.curves?.USDKRW?.fxSwapPoints) {
+          data.curves.USDKRW.fxSwapPoints = data.curves.USDKRW.fxSwapPoints.map(sp => {
+            const spreadPips = spreads[sp.tenor] || 0;
+            const spreadValue = spreadPips / 100;
+            return {
+              ...sp,
+              bid: sp.points - spreadValue,
+              ask: sp.points + spreadValue
+            };
+          });
+        }
+        
+        // Spot Date 기준으로 기본 날짜 설정
+        const spotDate = data.curves?.USDKRW?.USD?.spotDate;
+        if (spotDate) {
+          setInterpStartDate(spotDate);
+          const maturity = new Date(spotDate);
+          maturity.setMonth(maturity.getMonth() + 1);
+          setInterpDate(maturity.toISOString().split('T')[0]);
+        }
+        setCurveData(data);
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      } catch (error) {
+        console.error('Load error:', error);
+        setLoading(false);
+      }
+    };
+    
+    loadData();
   }, []);
 
   const selectedClient = config.clients.find(c => c.clientId === selectedClientId);
-  const spot = curveData?.spotRates?.USDKRW || 1193.87;
+  const spot = liveSpot || curveData?.spotRates?.USDKRW || 1450.00;
 
   // Notional Tier 찾기
   const getNotionalTier = (notional) => {
@@ -2514,8 +3188,27 @@ function ClientPricingTab({ config, selectedClientId, setSelectedClientId, prici
           <h2 className="text-xl font-semibold">💰 Client Pricing</h2>
           <p className="text-sm text-kustody-muted mt-1">고객별 마진 적용 가격 산출</p>
         </div>
-        <div className="text-right text-sm text-kustody-muted">
-          Spot: <span className="font-mono text-kustody-accent">{spot.toFixed(2)}</span>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => fetchNaverSpot(true)}
+            disabled={naverLoading}
+            className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+              naverLoading
+                ? 'bg-orange-500/50 text-white cursor-wait'
+                : 'bg-orange-500 text-white hover:bg-orange-400'
+            }`}
+          >
+            {naverLoading ? '⏳' : '📡'}
+          </button>
+          <div className="text-right text-sm">
+            <div className="text-kustody-muted">Spot (USDKRW)</div>
+            <div className="font-mono text-lg font-bold text-kustody-accent">
+              {spot.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+            </div>
+            {naverLastUpdate && (
+              <div className="text-xs text-kustody-muted">{naverLastUpdate.toLocaleTimeString('ko-KR')}</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -3701,7 +4394,7 @@ const formatUsdKorean = (amount) => {
 };
 
 // ==================== Advisory Tab ====================
-function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, pricingNotional, setPricingNotional }) {
+function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, pricingNotional, setPricingNotional, sharedCurveData }) {
   const [curveData, setCurveData] = useState(null);
   const [nearDate, setNearDate] = useState('2020-03-04'); // Swap Near leg (Start)
   const [farDate, setFarDate] = useState('2020-04-06'); // Swap Far leg (Maturity) / Outright 결제일
@@ -3714,6 +4407,12 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
   const [proMode, setProMode] = useState(false); // Pro Mode 토글
   const [usdMmda, setUsdMmda] = useState(4.5); // USD MMDA 금리 (%)
   const [krwMmda, setKrwMmda] = useState(3.0); // KRW 고금리통장 금리 (%)
+  
+  // 네이버 환율 state
+  const [liveSpot, setLiveSpot] = useState(null);
+  const [naverLoading, setNaverLoading] = useState(false);
+  const [naverLastUpdate, setNaverLastUpdate] = useState(null);
+  
   const [tradeForm, setTradeForm] = useState({ 
     instrument: 'FX_SWAP',      // 'FX_SWAP' | 'OUTRIGHT'
     direction: 'B/S',           // FX Swap: 'B/S' | 'S/B', Outright: 'Buy' | 'Sell'
@@ -3732,24 +4431,65 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
     counterParty: '', 
     trader: '' 
   });
-
-  useEffect(() => {
-    fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => {
-      if (data) { 
-        setCurveData(data); 
-        const spotDate = data.curves?.USDKRW?.USD?.spotDate; 
-        if (spotDate) { 
-          setNearDate(spotDate); // Near = Spot Date
-          const m = new Date(spotDate); 
-          m.setMonth(m.getMonth() + 1); 
-          setFarDate(m.toISOString().split('T')[0]); 
-        } 
+  
+  // 네이버 환율 가져오기 (4분 캐싱)
+  const fetchNaverSpot = async (force = false) => {
+    const now = Date.now();
+    
+    // 전역 캐시 체크
+    if (!force && naverRateCache.data && naverRateCache.lastFetch && 
+        (now - naverRateCache.lastFetch) < naverRateCache.CACHE_DURATION) {
+      if (naverRateCache.data.USDKRW) {
+        setLiveSpot(naverRateCache.data.USDKRW);
+        setNaverLastUpdate(new Date(naverRateCache.lastFetch));
       }
-    });
+      return naverRateCache.data.USDKRW;
+    }
+    
+    setNaverLoading(true);
+    try {
+      const response = await fetch('/api/naver-rates');
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.rates?.USDKRW) {
+          const rate = result.rates.USDKRW;
+          setLiveSpot(rate);
+          setNaverLastUpdate(new Date(now));
+          
+          // 전역 캐시 업데이트
+          naverRateCache.data = result.rates;
+          naverRateCache.lastFetch = now;
+          
+          return rate;
+        }
+      }
+    } catch (error) {
+      console.error('Naver spot fetch error:', error);
+    } finally {
+      setNaverLoading(false);
+    }
+    return null;
+  };
+
+  // sharedCurveData (Curves 탭에서 이미 spread 적용됨)를 사용
+  useEffect(() => {
+    if (sharedCurveData) {
+      setCurveData(sharedCurveData);
+      
+      const spotDate = sharedCurveData.curves?.USDKRW?.USD?.spotDate;
+      if (spotDate) {
+        setNearDate(spotDate);
+        const m = new Date(spotDate);
+        m.setMonth(m.getMonth() + 1);
+        setFarDate(m.toISOString().split('T')[0]);
+      }
+    }
+    
     // 조회 로그 로드
     const saved = localStorage.getItem('kustodyfi_query_log');
     if (saved) try { setQueryLog(JSON.parse(saved)); } catch(e) {}
-  }, []);
+  }, [sharedCurveData]);
 
   const spot = curveData?.spotRates?.USDKRW || 1193.87;
   const fxSwapPoints = curveData?.curves?.USDKRW?.fxSwapPoints || [];
@@ -3928,7 +4668,30 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
             ))}
           </select>
         </div>
-        <div className="text-right text-sm text-kustody-muted">Spot: <span className="font-mono text-kustody-text">{formatNumber(spot, 2)}</span></div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => fetchNaverSpot(true)}
+              disabled={naverLoading}
+              className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                naverLoading
+                  ? 'bg-orange-500/50 text-white cursor-wait'
+                  : 'bg-orange-500 text-white hover:bg-orange-400'
+              }`}
+            >
+              {naverLoading ? '⏳' : '📡'}
+            </button>
+            <div className="text-right text-sm">
+              <div className="text-kustody-muted">Spot (USDKRW)</div>
+              <div className="font-mono text-lg font-bold text-kustody-accent">
+                {liveSpot ? liveSpot.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : formatNumber(spot, 3)}
+              </div>
+              {naverLastUpdate && (
+                <div className="text-xs text-kustody-muted">{naverLastUpdate.toLocaleTimeString('ko-KR')}</div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {selectedClient && !isBlocked && (
@@ -5011,7 +5774,7 @@ function BlotterTab({ blotter, config, deleteTrade, selectedClientId, setSelecte
 function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientId }) {
   const [selectedCcy, setSelectedCcy] = useState('USD');
   const [curveData, setCurveData] = useState(null);
-  useEffect(() => { fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
+  useEffect(() => { fetch('/config/curves/20260127_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
 
   // 고객 필터 적용
   const filteredBlotter = selectedClientId 
@@ -5145,38 +5908,94 @@ function ValuationTab({ blotter, fixingRate, setFixingRate }) {
   const [valuationDate, setValuationDate] = useState(new Date().toISOString().split('T')[0]);
   const [decimalPlaces, setDecimalPlaces] = useState(2);
   const [showFull, setShowFull] = useState(false);
-  useEffect(() => { fetch('/config/curves/20200302_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
+  useEffect(() => { fetch('/config/curves/20260127_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
 
-  const getRebasedDF = (days) => {
-    if (!curveData) return 1;
-    const tenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
-    if (tenors.length === 0) return 1;
-    
-    const sorted = [...tenors].sort((a, b) => a.days - b.days);
-    
-    // 보간 함수
-    const interpolate = (d) => {
-      for (let i = 0; i < sorted.length - 1; i++) {
-        if (sorted[i].days <= d && sorted[i + 1].days >= d) {
-          const r = (d - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
-          return sorted[i].df + (sorted[i + 1].df - sorted[i].df) * r;
-        }
-      }
-      if (d <= sorted[0].days) return sorted[0].df;
-      if (d >= sorted[sorted.length - 1].days) return sorted[sorted.length - 1].df;
-      return 1;
-    };
-    
-    // Today (Days=0)의 DF를 보간해서 구함
-    const todayDF = interpolate(0);
-    
-    // 해당 days의 DF를 보간해서 구하고 todayDF로 나눔
-    const df = interpolate(days);
-    
-    return df / todayDF;
+  // rate → DF 계산
+  // USD: ACT/360, KRW: ACT/365
+  const rateToDf = (rate, days, dayCountBase) => {
+    if (days <= 0) return 1;
+    return 1 / (1 + (rate / 100) * (days / dayCountBase));
   };
 
-  const dailyRates = (() => { const rates = [], today = new Date(valuationDate); for (let d = 0; d <= 730; d++) { const date = new Date(today); date.setDate(date.getDate() + d); const df = getRebasedDF(d); rates.push({ date: date.toISOString().split('T')[0], days: d, df, forwardRate: fixingRate * df }); } return rates; })();
+  // LN(DF) 보간 함수 (Log-Linear Interpolation)
+  const interpolateDfLogLinear = (tenors, targetDays, dayCountBase) => {
+    if (!tenors || tenors.length === 0) return 1;
+    if (targetDays <= 0) return 1;
+    
+    // days가 0 이상인 것만 필터링하고 정렬
+    const sorted = [...tenors]
+      .filter(t => t.days >= 0)
+      .map(t => ({
+        ...t,
+        df: rateToDf(t.rate, t.days, dayCountBase),
+        lnDf: Math.log(rateToDf(t.rate, t.days, dayCountBase))
+      }))
+      .sort((a, b) => a.days - b.days);
+    
+    if (sorted.length === 0) return 1;
+    
+    // 범위 체크
+    if (targetDays <= sorted[0].days) {
+      // 첫 번째 포인트 이전: 첫 번째 rate로 계산
+      return rateToDf(sorted[0].rate, targetDays, dayCountBase);
+    }
+    if (targetDays >= sorted[sorted.length - 1].days) {
+      // 마지막 포인트 이후: flat extrapolation
+      return rateToDf(sorted[sorted.length - 1].rate, targetDays, dayCountBase);
+    }
+    
+    // LN(DF) 보간
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].days <= targetDays && sorted[i + 1].days >= targetDays) {
+        const ratio = (targetDays - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
+        const lnDfInterp = sorted[i].lnDf + (sorted[i + 1].lnDf - sorted[i].lnDf) * ratio;
+        return Math.exp(lnDfInterp);
+      }
+    }
+    
+    return 1;
+  };
+
+  // Forward Rate 계산: Spot × USD_DF / KRW_DF
+  const getForwardRate = (days) => {
+    if (!curveData) return fixingRate;
+    
+    const usdTenors = curveData.curves?.USDKRW?.USD?.tenors || [];
+    const krwTenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
+    
+    // USD DF (ACT/360)
+    const usdDf = interpolateDfLogLinear(usdTenors, days, 360);
+    
+    // KRW DF (ACT/365)
+    const krwDf = interpolateDfLogLinear(krwTenors, days, 365);
+    
+    // Forward = Spot × USD_DF / KRW_DF
+    return fixingRate * usdDf / krwDf;
+  };
+
+  // Rebased DF (Today=1 기준)
+  // Today (days=0)의 DF로 나눠서 Today가 1이 되도록 함
+  const getRebasedDF = (days) => {
+    if (!curveData) return 1;
+    
+    const usdTenors = curveData.curves?.USDKRW?.USD?.tenors || [];
+    const krwTenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
+    
+    // Today (days=0) 기준 DF 계산
+    const usdDf0 = interpolateDfLogLinear(usdTenors, 0, 360);
+    const krwDf0 = interpolateDfLogLinear(krwTenors, 0, 365);
+    const todayRatio = usdDf0 / krwDf0; // Today의 USD_DF/KRW_DF
+    
+    // Target days의 DF 계산
+    const usdDf = interpolateDfLogLinear(usdTenors, days, 360);
+    const krwDf = interpolateDfLogLinear(krwTenors, days, 365);
+    const targetRatio = usdDf / krwDf; // Target의 USD_DF/KRW_DF
+    
+    // Rebase: Today=1 기준
+    return targetRatio / todayRatio;
+  };
+
+  const dailyRates = (() => { const rates = [], today = new Date(valuationDate); for (let d = 0; d <= 730; d++) { const date = new Date(today); date.setDate(date.getDate() + d); const df = getRebasedDF(d); const forwardRate = fixingRate * df; rates.push({ date: date.toISOString().split('T')[0], days: d, df, forwardRate }); } return rates; })();
 
   const evalTrades = (() => { const today = new Date(valuationDate); return blotter.filter(t => new Date(t.settlementDate) > today).map(t => { const days = Math.round((new Date(t.settlementDate) - today) / 864e5); const df = getRebasedDF(days); const evalRate = fixingRate * df; const pnl = (evalRate - (parseFloat(t.rate) || 0)) * (t.ccy1Amt || 0); return { ...t, days, df, evalRate, pnl }; }); })();
   const totalPnL = evalTrades.reduce((s, t) => s + t.pnl, 0);
@@ -5203,6 +6022,378 @@ function ValuationTab({ blotter, fixingRate, setFixingRate }) {
         <tbody>{evalTrades.map((t, i) => (<tr key={i} className="border-b border-kustody-border/30"><td className="py-2 font-mono text-xs">{t.settlementDate}</td><td className="py-2 text-right font-mono text-kustody-muted">{t.days}</td><td className="py-2 text-right font-mono">{formatNumber(parseFloat(t.rate), 2)}</td><td className="py-2 text-right font-mono text-kustody-accent">{formatNumber(t.evalRate, 2)}</td><td className="py-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td><td className={`py-2 text-right font-mono font-semibold ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(t.pnl, 0)}</td></tr>))}</tbody>
         <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td colSpan="5" className="py-2">Total 미실현손익</td><td className={`py-2 text-right font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalPnL, 0)} KRW</td></tr></tfoot>
       </table></div>)}
+    </div>
+  );
+}
+
+// ==================== Cash Balance Tab ====================
+function CashBalanceTab({ blotter, config, selectedClientId, setSelectedClientId }) {
+  const [balanceDate, setBalanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [usdBalance, setUsdBalance] = useState(0);
+  const [krwBalance, setKrwBalance] = useState(0);
+  
+  // 선택된 고객의 잔액 계산
+  const filteredTrades = selectedClientId === 'ALL' 
+    ? blotter 
+    : blotter.filter(t => t.clientId === selectedClientId);
+  
+  // 특정 날짜 기준 잔액 계산
+  const calculateBalance = () => {
+    let usd = 0;
+    let krw = 0;
+    
+    filteredTrades.forEach(trade => {
+      if (trade.settlementDate <= balanceDate) {
+        if (trade.type === 'BUY') {
+          usd += parseFloat(trade.ccy1Amt) || 0;
+          krw -= parseFloat(trade.ccy2Amt) || 0;
+        } else {
+          usd -= parseFloat(trade.ccy1Amt) || 0;
+          krw += parseFloat(trade.ccy2Amt) || 0;
+        }
+      }
+    });
+    
+    return { usd, krw };
+  };
+  
+  const balance = calculateBalance();
+  
+  // 일별 잔액 히스토리 생성
+  const generateBalanceHistory = () => {
+    const history = [];
+    const sortedTrades = [...filteredTrades].sort((a, b) => 
+      new Date(a.settlementDate) - new Date(b.settlementDate)
+    );
+    
+    let runningUsd = 0;
+    let runningKrw = 0;
+    
+    sortedTrades.forEach(trade => {
+      if (trade.type === 'BUY') {
+        runningUsd += parseFloat(trade.ccy1Amt) || 0;
+        runningKrw -= parseFloat(trade.ccy2Amt) || 0;
+      } else {
+        runningUsd -= parseFloat(trade.ccy1Amt) || 0;
+        runningKrw += parseFloat(trade.ccy2Amt) || 0;
+      }
+      
+      history.push({
+        date: trade.settlementDate,
+        tradeId: trade.id,
+        type: trade.type,
+        usdChange: trade.type === 'BUY' ? parseFloat(trade.ccy1Amt) : -parseFloat(trade.ccy1Amt),
+        krwChange: trade.type === 'BUY' ? -parseFloat(trade.ccy2Amt) : parseFloat(trade.ccy2Amt),
+        usdBalance: runningUsd,
+        krwBalance: runningKrw,
+      });
+    });
+    
+    return history;
+  };
+  
+  const balanceHistory = generateBalanceHistory();
+  
+  const formatNumber = (num) => {
+    if (num === undefined || num === null || isNaN(num)) return '-';
+    return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 요약 카드 */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="text-kustody-muted text-xs mb-2">기준일</div>
+          <input 
+            type="date" 
+            value={balanceDate} 
+            onChange={(e) => setBalanceDate(e.target.value)}
+            className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono"
+          />
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="text-kustody-muted text-xs mb-2">USD Balance</div>
+          <div className={`text-2xl font-mono font-bold ${balance.usd >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {formatNumber(balance.usd)}
+          </div>
+        </div>
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <div className="text-kustody-muted text-xs mb-2">KRW Balance</div>
+          <div className={`text-2xl font-mono font-bold ${balance.krw >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {formatNumber(balance.krw)}
+          </div>
+        </div>
+      </div>
+      
+      {/* 고객 필터 */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <div className="flex items-center gap-4 mb-4">
+          <label className="text-sm text-kustody-muted">고객 필터:</label>
+          <select 
+            value={selectedClientId} 
+            onChange={(e) => setSelectedClientId(e.target.value)}
+            className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"
+          >
+            <option value="ALL">전체</option>
+            {config.clients?.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      
+      {/* 잔액 히스토리 */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <h3 className="font-semibold mb-4">📊 잔액 변동 히스토리</h3>
+        <div className="overflow-x-auto max-h-96">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-kustody-surface">
+              <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+                <th className="text-left py-2 px-2">Settlement Date</th>
+                <th className="text-center py-2 px-2">Type</th>
+                <th className="text-right py-2 px-2">USD Change</th>
+                <th className="text-right py-2 px-2">KRW Change</th>
+                <th className="text-right py-2 px-2">USD Balance</th>
+                <th className="text-right py-2 px-2">KRW Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balanceHistory.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="text-center py-8 text-kustody-muted">거래 내역이 없습니다</td>
+                </tr>
+              ) : (
+                balanceHistory.map((row, i) => (
+                  <tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                    <td className="py-2 px-2 font-mono text-xs">{row.date}</td>
+                    <td className={`py-2 px-2 text-center font-semibold ${row.type === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>{row.type}</td>
+                    <td className={`py-2 px-2 text-right font-mono ${row.usdChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(row.usdChange)}</td>
+                    <td className={`py-2 px-2 text-right font-mono ${row.krwChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(row.krwChange)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-kustody-accent">{formatNumber(row.usdBalance)}</td>
+                    <td className="py-2 px-2 text-right font-mono text-kustody-accent">{formatNumber(row.krwBalance)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Accounting Rates Tab ====================
+function AccountingRatesTab() {
+  const [rates, setRates] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [error, setError] = useState(null);
+  
+  // Supabase 설정
+  const SUPABASE_URL = 'https://dxenbwvhxdcgtdivjhpa.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_jmXQn-qfWdQ6XNOW9preiQ_bHgXbHxO';
+  
+  // 재무환율 데이터 로드
+  const fetchRates = async (date) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/accounting_rates?reference_date=eq.${date}&order=currency_code.asc`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error('데이터를 가져올 수 없습니다');
+      }
+      
+      const data = await response.json();
+      setRates(data);
+      
+      if (data.length === 0) {
+        setError('해당 날짜의 데이터가 없습니다.');
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 최신 날짜 데이터 로드
+  const fetchLatestRates = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `${SUPABASE_URL}/rest/v1/accounting_rates?order=reference_date.desc,currency_code.asc&limit=100`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error('데이터를 가져올 수 없습니다');
+      }
+      
+      const data = await response.json();
+      
+      if (data.length > 0) {
+        const latestDate = data[0].reference_date;
+        setSelectedDate(latestDate);
+        setRates(data.filter(r => r.reference_date === latestDate));
+      } else {
+        setError('데이터가 없습니다. 스크래퍼를 실행해주세요.');
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // 컴포넌트 마운트 시 최신 데이터 로드
+  useEffect(() => {
+    fetchLatestRates();
+  }, []);
+  
+  const formatNumber = (num, decimals = 2) => {
+    if (num === undefined || num === null || isNaN(num)) return '-';
+    return num.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  };
+  
+  // 주요 통화 분리 (USD 항상 맨 앞)
+  const majorCurrencyOrder = ['USD', 'CNH', 'EUR', 'GBP', 'JPY'];
+  const majorRates = majorCurrencyOrder
+    .map(code => rates.find(r => r.currency_code === code))
+    .filter(Boolean);
+  
+  // 전체 목록도 USD 우선 정렬
+  const sortedRates = [...rates].sort((a, b) => {
+    if (a.currency_code === 'USD') return -1;
+    if (b.currency_code === 'USD') return 1;
+    return a.currency_code.localeCompare(b.currency_code);
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* 헤더 */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-lg">🏦 재무환율 (Accounting Rates)</h3>
+          <div className="flex items-center gap-3">
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono text-sm"
+            />
+            <button 
+              onClick={() => fetchRates(selectedDate)}
+              disabled={loading}
+              className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold text-sm hover:bg-kustody-accent/80 disabled:opacity-50"
+            >
+              {loading ? '⏳' : '🔍 조회'}
+            </button>
+            <button 
+              onClick={fetchLatestRates}
+              disabled={loading}
+              className="px-4 py-2 bg-green-500 text-white rounded-lg font-semibold text-sm hover:bg-green-400 disabled:opacity-50"
+            >
+              {loading ? '⏳' : '📡 최신'}
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-kustody-muted">
+          출처: 서울외국환중개 (smbs.biz) · 매일 08:40 KST 기준 · {selectedDate}
+        </p>
+      </div>
+      
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-400 text-sm">
+          ⚠️ {error}
+        </div>
+      )}
+      
+      {/* 주요 통화 */}
+      {majorRates.length > 0 && (
+        <div className="bg-kustody-surface rounded-xl p-5">
+          <h4 className="font-semibold mb-4">💱 주요 통화</h4>
+          <div className="grid grid-cols-5 gap-4">
+            {majorRates.map((rate) => (
+              <div key={rate.currency_code} className="bg-kustody-dark rounded-lg p-4 text-center">
+                <div className="text-xs text-kustody-muted mb-1">{rate.currency_name}</div>
+                <div className="text-xl font-mono font-bold text-kustody-accent">
+                  {formatNumber(rate.rate_krw, rate.currency_code === 'JPY' ? 4 : 2)}
+                </div>
+                {rate.change_rate !== null && rate.change_rate !== undefined && (
+                  <div className={`text-xs mt-1 ${rate.change_rate >= 0 ? 'text-red-400' : 'text-blue-400'}`}>
+                    {rate.change_rate >= 0 ? '▲' : '▼'} {Math.abs(rate.change_rate).toFixed(2)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* 전체 통화 테이블 */}
+      <div className="bg-kustody-surface rounded-xl p-5">
+        <h4 className="font-semibold mb-4">📋 전체 통화 ({rates.length}개)</h4>
+        <div className="overflow-x-auto max-h-96">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-kustody-surface">
+              <tr className="text-kustody-muted text-xs border-b border-kustody-border">
+                <th className="text-left py-2 px-3">통화</th>
+                <th className="text-left py-2 px-3">통화명</th>
+                <th className="text-right py-2 px-3">환율 (원)</th>
+                <th className="text-right py-2 px-3">전일대비</th>
+                <th className="text-right py-2 px-3">Cross Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRates.length === 0 ? (
+                <tr>
+                  <td colSpan="5" className="text-center py-8 text-kustody-muted">
+                    {loading ? '로딩 중...' : '데이터가 없습니다'}
+                  </td>
+                </tr>
+              ) : (
+                sortedRates.map((rate) => (
+                  <tr key={rate.currency_code} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
+                    <td className="py-2 px-3 font-mono font-semibold">{rate.currency_code}</td>
+                    <td className="py-2 px-3 text-kustody-muted text-xs">{rate.currency_name}</td>
+                    <td className="py-2 px-3 text-right font-mono text-kustody-accent">
+                      {formatNumber(rate.rate_krw, 4)}
+                    </td>
+                    <td className={`py-2 px-3 text-right font-mono ${
+                      rate.change_rate > 0 ? 'text-red-400' : rate.change_rate < 0 ? 'text-blue-400' : 'text-kustody-muted'
+                    }`}>
+                      {rate.change_rate !== null && rate.change_rate !== undefined 
+                        ? `${rate.change_rate >= 0 ? '+' : ''}${rate.change_rate.toFixed(2)}` 
+                        : '-'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-kustody-muted">
+                      {rate.cross_rate ? formatNumber(rate.cross_rate, 6) : '-'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

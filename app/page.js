@@ -10,6 +10,7 @@ import {
   getDayName,
   getDayNameEn
 } from '../lib/dateCalculator';
+import StableFXLanding from './components/StableFXLanding';
 
 const DEFAULT_HOLIDAYS = {
   KR: [
@@ -145,6 +146,7 @@ const FEATURE_INTERESTS = [
 export default function PublicLanding() {
   const [holidays, setHolidays] = useState(DEFAULT_HOLIDAYS);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [mainView, setMainView] = useState('calculator'); // 'landing', 'calculator'
   const [activeSection, setActiveSection] = useState('calculator');
 
   // Date Calculator State
@@ -422,8 +424,68 @@ export default function PublicLanding() {
   const spot = curveData?.spotRates?.USDKRW || 1193.85;
   const interpCalc = calculateInterpolation();
 
+  // Navigation handler for landing page
+  const handleLandingNavigate = (target) => {
+    if (target === 'calculator') {
+      setMainView('calculator');
+    } else if (target === 'console') {
+      window.location.href = '/console';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-kustody-dark">
+      {/* Global Navigation Bar */}
+      <nav className="bg-kustody-surface border-b border-kustody-border sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-kustody-accent to-emerald-600 rounded-lg flex items-center justify-center font-bold text-sm text-kustody-dark">
+              S
+            </div>
+            <span className="text-xl font-bold text-kustody-text">
+              Stable<span className="text-kustody-accent">FX</span>
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setMainView('landing')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                mainView === 'landing'
+                  ? 'bg-kustody-accent/10 text-kustody-accent'
+                  : 'text-kustody-muted hover:text-kustody-text hover:bg-kustody-navy/50'
+              }`}
+            >
+              🏠 About
+            </button>
+            <button
+              onClick={() => setMainView('calculator')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                mainView === 'calculator'
+                  ? 'bg-kustody-accent/10 text-kustody-accent'
+                  : 'text-kustody-muted hover:text-kustody-text hover:bg-kustody-navy/50'
+              }`}
+            >
+              🧮 Calculator
+            </button>
+            <a
+              href="/console"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-kustody-muted hover:text-kustody-text hover:bg-kustody-navy/50 transition-all"
+            >
+              🚀 Console
+            </a>
+          </div>
+        </div>
+      </nav>
+
+      {/* Landing Page View */}
+      {mainView === 'landing' && (
+        <StableFXLanding onNavigate={handleLandingNavigate} />
+      )}
+
+      {/* Calculator View */}
+      {mainView === 'calculator' && (
+        <>
       {/* Hero Section */}
       <div className="bg-gradient-to-b from-kustody-navy to-kustody-dark">
         <div className="max-w-6xl mx-auto px-6 py-12">
@@ -461,6 +523,12 @@ export default function PublicLanding() {
             >
               📊 스왑포인트 조회
             </button>
+            <a
+              href="/console"
+              className="px-6 py-3 rounded-lg font-medium transition-all bg-kustody-navy border border-kustody-accent/50 text-kustody-accent hover:bg-kustody-accent hover:text-kustody-dark"
+            >
+              🚀 전문가 콘솔
+            </a>
           </div>
         </div>
       </div>
@@ -1008,6 +1076,8 @@ export default function PublicLanding() {
           <p>© 2025 StableFX. FX Infrastructure Platform.</p>
         </div>
       </div>
+        </>
+      )}
 
       {/* Floating Feedback Button */}
       {!showSurvey && !surveySubmitted && (
