@@ -185,7 +185,7 @@ export default function Console() {
   const [blotter, setBlotter] = useState([]);
   
   // Valuation 설정
-  const [fixingRate, setFixingRate] = useState(1450.50); // 재무환율
+  const [fixingRate, setFixingRate] = useState(1442.80); // 재무환율 (Accounting Rates USD)
 
   // localStorage에서 Config 로드
   useEffect(() => {
@@ -6128,13 +6128,13 @@ function ValuationTab({ blotter, fixingRate, setFixingRate, sharedCurveData }) {
   const totalPnL = evalTrades.reduce((s, t) => s + t.pnl, 0);
 
   const downloadCSV = () => { 
-    const h = 'Date,Days,DF_Rebased,Forward_Rate\n'; 
-    const r = dailyRates.map(x => `${x.date},${x.days},${x.df.toFixed(decimalPlaces)},${x.forwardRate.toFixed(decimalPlaces)}`).join('\n'); 
+    const h = 'Date,Days,DF_Rebased,공정가치_환율\n'; 
+    const r = dailyRates.map(x => `${x.date},${x.days},${x.df.toFixed(decimalPlaces)},${x.forwardRate.toFixed(3)}`).join('\n'); 
     const b = new Blob([h + r], { type: 'text/csv' }); 
     const u = URL.createObjectURL(b); 
     const a = document.createElement('a'); 
     a.href = u; 
-    a.download = `valuation_${valuationDate}_${decimalPlaces}dp.csv`; 
+    a.download = `공정가치환율_${valuationDate}.csv`; 
     a.click(); 
     URL.revokeObjectURL(u); 
   };
@@ -6166,29 +6166,29 @@ function ValuationTab({ blotter, fixingRate, setFixingRate, sharedCurveData }) {
       <div className="bg-kustody-surface rounded-xl p-5"><div className="grid grid-cols-4 gap-4">
         <div><label className="block text-xs text-kustody-muted mb-1">평가일 (Today=1 기준)</label><input type="date" value={valuationDate} onChange={(e) => setValuationDate(e.target.value)} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
         <div><label className="block text-xs text-kustody-muted mb-1">재무환율 (Accounting Rate USD)</label><input type="number" step="0.01" value={fixingRate} onChange={(e) => setFixingRate(parseFloat(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
-        <div><label className="block text-xs text-kustody-muted mb-1">CSV 소수점</label><select value={decimalPlaces} onChange={(e) => setDecimalPlaces(parseInt(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"><option value={6}>6자리</option><option value={8}>8자리</option><option value={10}>10자리</option></select></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">CSV 소수점 (DF)</label><select value={decimalPlaces} onChange={(e) => setDecimalPlaces(parseInt(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"><option value={6}>6자리</option><option value={8}>8자리</option><option value={10}>10자리</option></select></div>
         <div className="flex items-end gap-2"><button onClick={() => setShowFull(!showFull)} className={`px-3 py-2 rounded-lg text-sm ${showFull ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-navy'}`}>{showFull ? '10자리' : '4자리'}</button><button onClick={downloadCSV} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold">📥 CSV</button></div>
       </div></div>
       
       {/* 계산 로직 설명 */}
       <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 text-sm">
-        <p className="text-blue-300 mb-2">📐 <strong>Forward Rate 계산 로직 (Today Rebasing)</strong></p>
+        <p className="text-blue-300 mb-2">📐 <strong>공정가치 환율 계산 로직 (Today Rebasing)</strong></p>
         <ul className="text-blue-200/80 text-xs space-y-1">
           <li>• Curves 탭: Spot Date (T+{spotDays}) 기준 DF=1</li>
           <li>• Today (T+0) 원본 ratio = USD_DF / KRW_DF = <span className="font-mono text-yellow-300">{todayRatio.toFixed(10)}</span></li>
           <li>• <strong>Rebased DF(d) = 원본 ratio(d) / Today 원본 ratio</strong> → Today DF = 1</li>
-          <li>• Forward Rate = 재무환율 ({formatNumber(fixingRate, 2)}) × Rebased DF</li>
+          <li>• 공정가치 환율 = 재무환율 ({formatNumber(fixingRate, 2)}) × Rebased DF</li>
         </ul>
       </div>
       
-      <div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">📈 Daily Forward Rate (평가일={valuationDate}, Today DF=1)</h3><div className="overflow-x-auto max-h-96">
-        <table className="w-full text-sm"><thead className="sticky top-0 bg-kustody-surface"><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">Date</th><th className="text-right py-2 px-2">Days</th><th className="text-right py-2 px-2">DF (Rebased)</th><th className="text-right py-2 px-2">Forward Rate</th></tr></thead>
-        <tbody>{dailyRates.slice(0, 100).map((r, i) => (<tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20"><td className="py-1 px-2 font-mono text-xs">{r.date}</td><td className="py-1 px-2 text-right font-mono text-kustody-muted">{r.days}</td><td className="py-1 px-2 text-right font-mono">{fmt(r.df, 8)}</td><td className="py-1 px-2 text-right font-mono text-kustody-accent">{fmt(r.forwardRate)}</td></tr>))}</tbody></table>
+      <div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">📈 일별 공정가치 환율 (평가일={valuationDate}, Today DF=1)</h3><div className="overflow-x-auto max-h-96">
+        <table className="w-full text-sm"><thead className="sticky top-0 bg-kustody-surface"><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">Date</th><th className="text-right py-2 px-2">Days</th><th className="text-right py-2 px-2">DF (Rebased)</th><th className="text-right py-2 px-2">공정가치 환율</th></tr></thead>
+        <tbody>{dailyRates.slice(0, 100).map((r, i) => (<tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20"><td className="py-1 px-2 font-mono text-xs">{r.date}</td><td className="py-1 px-2 text-right font-mono text-kustody-muted">{r.days}</td><td className="py-1 px-2 text-right font-mono">{fmt(r.df, 10)}</td><td className="py-1 px-2 text-right font-mono text-kustody-accent">{r.forwardRate.toFixed(3)}</td></tr>))}</tbody></table>
         <p className="text-xs text-kustody-muted mt-2 text-center">처음 100일만 표시 (CSV로 전체 다운로드)</p>
       </div></div>
       {evalTrades.length > 0 && (<div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">💹 미결제 거래 평가</h3>
         <table className="w-full text-sm"><thead><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2">결제일</th><th className="text-right py-2">Days</th><th className="text-right py-2">거래환율</th><th className="text-right py-2">평가환율</th><th className="text-right py-2">Notional</th><th className="text-right py-2">미실현손익</th></tr></thead>
-        <tbody>{evalTrades.map((t, i) => (<tr key={i} className="border-b border-kustody-border/30"><td className="py-2 font-mono text-xs">{t.settlementDate}</td><td className="py-2 text-right font-mono text-kustody-muted">{t.days}</td><td className="py-2 text-right font-mono">{formatNumber(parseFloat(t.rate), 2)}</td><td className="py-2 text-right font-mono text-kustody-accent">{formatNumber(t.evalRate, 2)}</td><td className="py-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td><td className={`py-2 text-right font-mono font-semibold ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(t.pnl, 0)}</td></tr>))}</tbody>
+        <tbody>{evalTrades.map((t, i) => (<tr key={i} className="border-b border-kustody-border/30"><td className="py-2 font-mono text-xs">{t.settlementDate}</td><td className="py-2 text-right font-mono text-kustody-muted">{t.days}</td><td className="py-2 text-right font-mono">{formatNumber(parseFloat(t.rate), 2)}</td><td className="py-2 text-right font-mono text-kustody-accent">{t.evalRate.toFixed(3)}</td><td className="py-2 text-right font-mono">{formatNumber(t.ccy1Amt, 0)}</td><td className={`py-2 text-right font-mono font-semibold ${t.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(t.pnl, 0)}</td></tr>))}</tbody>
         <tfoot><tr className="border-t-2 border-kustody-border font-semibold"><td colSpan="5" className="py-2">Total 미실현손익</td><td className={`py-2 text-right font-mono ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(totalPnL, 0)} KRW</td></tr></tfoot>
       </table></div>)}
     </div>

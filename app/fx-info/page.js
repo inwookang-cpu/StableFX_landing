@@ -6,6 +6,10 @@ export default function FXInfoPage() {
   const [selectedPair, setSelectedPair] = useState('USDKRW');
   const [activeTab, setActiveTab] = useState('news');
   const [loading, setLoading] = useState(false);
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertEmail, setAlertEmail] = useState('');
+  const [alertTarget, setAlertTarget] = useState('');
+  const [alertSubmitted, setAlertSubmitted] = useState(false);
   
   // Supabase에서 실시간 데이터 가져오기 (나중에 연동)
   const SUPABASE_URL = 'https://dxenbwvhxdcgtdivjhpa.supabase.co';
@@ -221,35 +225,38 @@ export default function FXInfoPage() {
         {/* Forward Points - 데이터 있는 경우만 */}
         {data.forward1M !== null && (
         <div className="p-4 border-t border-gray-800">
-          <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-base font-bold">선물환 스왑포인트</h2>
-            <span className="px-1.5 py-0.5 bg-blue-900/50 rounded text-xs text-blue-300">기업전용</span>
+          <div className="flex items-center gap-2 mb-2">
+            <h2 className="text-base font-bold">📌 지금 환율 고정하기</h2>
+            <span className="px-1.5 py-0.5 bg-blue-900/50 rounded text-xs text-blue-300">선물환</span>
           </div>
+          <p className="text-xs text-gray-500 mb-3">오늘 환율로 고정하고, 미래에 결제하세요</p>
           
           <div className="grid grid-cols-4 gap-2">
             {[
-              { label: '1M', value: data.forward1M },
-              { label: '3M', value: data.forward3M },
-              { label: '6M', value: data.forward6M },
-              { label: '1Y', value: data.forward1Y }
-            ].map(({ label, value }) => (
-              <div key={label} className="bg-gray-900 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500">{label}</div>
+              { label: '1개월 후', tenor: '1M', value: data.forward1M },
+              { label: '3개월 후', tenor: '3M', value: data.forward3M },
+              { label: '6개월 후', tenor: '6M', value: data.forward6M },
+              { label: '1년 후', tenor: '1Y', value: data.forward1Y }
+            ].map(({ label, tenor, value }) => (
+              <div key={tenor} className="bg-gray-900 rounded-lg p-2 text-center">
+                <div className="text-[10px] text-gray-500">{label}</div>
                 <div className={`font-mono font-bold text-sm ${value >= 0 ? 'text-red-400' : 'text-blue-400'}`}>
                   {value >= 0 ? '+' : ''}{formatPoints(value)}
                 </div>
-                <div className="text-xs text-gray-600">
+                <div className="text-xs text-gray-400 font-mono">
                   {getCurrencySymbol()}{formatRate(data.rate + value)}
                 </div>
               </div>
             ))}
           </div>
           
-          <div className="mt-3 p-2.5 bg-gray-900/50 rounded-lg text-xs">
-            <span className="text-gray-500">💡 3개월 후 {selectedPair.startsWith('USD') ? '달러' : '유로'} 매도 시: </span>
+          <div className="mt-3 p-2.5 bg-blue-900/20 border border-blue-800/50 rounded-lg text-xs">
+            <span className="text-blue-300">💡 예시: </span>
+            <span className="text-gray-300">지금 3개월 선물환 계약 → </span>
             <span className="text-blue-400 font-mono font-bold">
               {getCurrencySymbol()}{formatRate(data.rate + data.forward3M)}
             </span>
+            <span className="text-gray-300">에 결제 확정</span>
           </div>
         </div>
         )}
@@ -267,35 +274,81 @@ export default function FXInfoPage() {
         </div>
         )}
 
-        {/* 헤지 계산기 - USD 페어만 표시 */}
+        {/* 외화 관리 옵션 - USD 페어만 표시 */}
         {selectedPair.endsWith('KRW') && selectedPair.startsWith('USD') && (
           <div className="p-4 border-t border-gray-800">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold">헤지 계산기</h2>
-                <span className="px-1.5 py-0.5 bg-green-900/50 rounded text-xs text-green-300">무료</span>
+                <h2 className="text-base font-bold">💰 달러 관리 옵션</h2>
               </div>
-              <a href="/console" className="text-blue-400 text-xs hover:underline">자세히 ›</a>
             </div>
             
-            <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-xl p-3">
-              <div className="text-xs text-gray-400 mb-2">USD 100만 달러, 3개월 헤지 시</div>
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div>
-                  <div className="text-xs text-gray-500">현물 환산</div>
-                  <div className="text-base font-bold font-mono">₩{(data.rate * 1000000 / 100000000).toFixed(2)}억</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">3M 선물환</div>
-                  <div className="text-base font-bold font-mono text-blue-400">
-                    ₩{((data.rate + data.forward3M) * 1000000 / 100000000).toFixed(2)}억
+            {/* 옵션 1: 미래에 달러가 들어오는 경우 */}
+            <div className="bg-gradient-to-r from-blue-900/30 to-blue-800/20 rounded-xl p-4 mb-3 border border-blue-800/50">
+              <div className="flex items-start gap-3">
+                <span className="text-xl">📅</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-blue-300 mb-1">미래에 달러가 들어오나요?</p>
+                  <p className="text-xs text-gray-400 mb-3">수출대금, 해외투자 회수 등 예정된 외화 입금이 있다면</p>
+                  
+                  <div className="bg-black/30 rounded-lg p-3 mb-3">
+                    <div className="text-xs text-gray-500 mb-2">예시: USD 100만불, 3개월 후 입금 예정</div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-gray-500">지금 선물환 계약 시</div>
+                        <div className="text-lg font-mono font-bold text-blue-400">₩{((data.rate + data.forward3M) * 1000000 / 100000000).toFixed(2)}억</div>
+                      </div>
+                      <div className="text-center px-3">
+                        <div className="text-[10px] text-gray-500">vs 현재 환율</div>
+                        <div className="text-sm font-mono text-gray-400">₩{(data.rate * 1000000 / 100000000).toFixed(2)}억</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-700 text-xs text-gray-500">
+                      선물환 계약가: <span className="text-blue-400 font-mono">{formatNumber(data.rate + data.forward3M, 2)}</span>원 (3개월 후 확정)
+                    </div>
                   </div>
+                  
+                  <button 
+                    onClick={() => window.location.href = '/console'}
+                    className="w-full py-2.5 bg-blue-600/80 hover:bg-blue-600 rounded-lg text-sm font-semibold transition-colors"
+                  >
+                    선물환 매도 약정하기 →
+                  </button>
                 </div>
               </div>
-              <div className="mt-2 pt-2 border-t border-gray-700 text-center">
-                <div className="text-xs text-gray-500">헤지 {data.forward3M >= 0 ? '비용' : '수익'}</div>
-                <div className={`text-lg font-bold ${data.forward3M >= 0 ? 'text-red-400' : 'text-green-400'}`}>
-                  {data.forward3M >= 0 ? '+' : '-'}₩{formatNumber(Math.abs(data.forward3M * 10000), 0)}만
+            </div>
+
+            {/* 옵션 2: 현재 달러를 보유 중인 경우 */}
+            <div className="bg-gradient-to-r from-green-900/30 to-green-800/20 rounded-xl p-4 border border-green-800/50">
+              <div className="flex items-start gap-3">
+                <span className="text-xl">🔔</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-green-300 mb-1">지금 달러를 갖고 계신가요?</p>
+                  <p className="text-xs text-gray-400 mb-3">더 좋은 환율에 팔고 싶다면 목표가 알림을 설정하세요</p>
+                  
+                  <div className="bg-black/30 rounded-lg p-3 mb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-gray-500">현재 환율</div>
+                        <div className="text-lg font-mono font-bold">{formatNumber(data.rate, 2)}</div>
+                      </div>
+                      <div className="text-2xl">→</div>
+                      <div>
+                        <div className="text-[10px] text-gray-500">목표 환율 예시</div>
+                        <div className="text-lg font-mono font-bold text-green-400">{formatNumber(data.rate * 1.02, 0)}</div>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-700 text-[10px] text-gray-500 text-center">
+                      🚀 향후 업데이트: 목표가 도달 시 자동 매도 기능
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={() => setShowAlertModal(true)}
+                    className="w-full py-2.5 bg-green-600/80 hover:bg-green-600 rounded-lg text-sm font-semibold transition-colors"
+                  >
+                    목표 환율 알림 설정 →
+                  </button>
                 </div>
               </div>
             </div>
@@ -344,14 +397,167 @@ export default function FXInfoPage() {
         {/* 하단 버튼 */}
         <div className="fixed bottom-0 left-0 right-0 p-3 bg-black border-t border-gray-800">
           <div className="max-w-md mx-auto flex gap-2">
-            <button className="flex-1 py-3 bg-blue-600 rounded-xl font-bold text-sm hover:bg-blue-500 transition-colors">
-              환율 알림 설정
+            <button 
+              onClick={() => setShowAlertModal(true)}
+              className="flex-1 py-3 bg-blue-600 rounded-xl font-bold text-sm hover:bg-blue-500 transition-colors"
+            >
+              🔔 환율 알림 설정
             </button>
             <button className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity">
-              헤지 상담 요청
+              💬 헤지 상담 요청
             </button>
           </div>
         </div>
+
+        {/* 환율 알림 설정 모달 */}
+        {showAlertModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-gray-900 rounded-2xl w-full max-w-sm overflow-hidden border border-gray-700">
+              {/* 모달 헤더 */}
+              <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 className="text-lg font-bold">🔔 환율 알림 설정</h3>
+                <button 
+                  onClick={() => { setShowAlertModal(false); setAlertSubmitted(false); }}
+                  className="text-gray-500 hover:text-white text-2xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+
+              {!alertSubmitted ? (
+                <div className="p-4 space-y-4">
+                  {/* 설명 */}
+                  <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                    <p className="text-sm text-blue-300">
+                      💡 목표 환율에 도달하면 알림을 보내드려요!<br/>
+                      <span className="text-xs text-blue-400">이메일, 카카오톡, SMS 중 선택 가능</span>
+                    </p>
+                  </div>
+
+                  {/* 통화쌍 표시 */}
+                  <div className="bg-gray-800 rounded-lg p-3">
+                    <div className="text-xs text-gray-500 mb-1">알림 대상</div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold">{data.code}</span>
+                      <span className="text-lg font-mono text-blue-400">{formatNumber(data.rate, data.rate < 10 ? 4 : 2)}</span>
+                    </div>
+                  </div>
+
+                  {/* 목표 환율 입력 */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">목표 환율</label>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setAlertTarget((data.rate * 0.99).toFixed(2))}
+                        className="px-3 py-2 bg-green-600/20 border border-green-600/50 rounded-lg text-xs text-green-400 hover:bg-green-600/30"
+                      >
+                        ▼ 1% 하락
+                      </button>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={alertTarget}
+                        onChange={(e) => setAlertTarget(e.target.value)}
+                        placeholder={data.rate.toFixed(2)}
+                        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-center font-mono focus:border-blue-500 focus:outline-none"
+                      />
+                      <button 
+                        onClick={() => setAlertTarget((data.rate * 1.01).toFixed(2))}
+                        className="px-3 py-2 bg-red-600/20 border border-red-600/50 rounded-lg text-xs text-red-400 hover:bg-red-600/30"
+                      >
+                        ▲ 1% 상승
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 이메일 입력 */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">이메일 주소</label>
+                    <input
+                      type="email"
+                      value={alertEmail}
+                      onChange={(e) => setAlertEmail(e.target.value)}
+                      placeholder="example@company.com"
+                      className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg focus:border-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* 알림 유형 */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">알림 유형</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['도달 시', '매일 오전', '급변 시'].map((type, i) => (
+                        <button
+                          key={type}
+                          className={`py-2 rounded-lg text-xs border ${i === 0 ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-gray-800 border-gray-700 text-gray-400'}`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 가입 유도 문구 */}
+                  <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-lg p-3 text-center">
+                    <p className="text-xs text-gray-400 mb-1">
+                      알림 설정은 <span className="text-blue-400 font-bold">무료</span>입니다
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      회원가입 시 더 많은 기능을 이용하실 수 있어요
+                    </p>
+                  </div>
+
+                  {/* 제출 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (alertEmail && alertTarget) {
+                        setAlertSubmitted(true);
+                        // TODO: Supabase에 저장
+                        console.log('Alert request:', { email: alertEmail, target: alertTarget, pair: selectedPair });
+                      }
+                    }}
+                    disabled={!alertEmail || !alertTarget}
+                    className="w-full py-3 bg-blue-600 rounded-xl font-bold text-sm hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    알림 설정하기
+                  </button>
+                </div>
+              ) : (
+                <div className="p-6 text-center">
+                  <div className="text-5xl mb-4">✅</div>
+                  <h4 className="text-lg font-bold mb-2">알림이 설정되었습니다!</h4>
+                  <p className="text-sm text-gray-400 mb-4">
+                    {data.code}가 <span className="text-blue-400 font-mono">{alertTarget}</span>에 도달하면<br/>
+                    <span className="text-blue-400">{alertEmail}</span>로 알림을 보내드릴게요.
+                  </p>
+                  
+                  <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-lg p-4 mb-4">
+                    <p className="text-sm text-gray-300 mb-2">🎁 회원가입하고 더 많은 혜택 받기</p>
+                    <ul className="text-xs text-gray-400 space-y-1 text-left">
+                      <li>✓ 무제한 알림 설정</li>
+                      <li>✓ 카카오톡/SMS 알림</li>
+                      <li>✓ 스왑포인트 이론가 계산기</li>
+                      <li>✓ 선물환 헤지 시뮬레이션</li>
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={() => window.location.href = '/console'}
+                    className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl font-bold text-sm hover:opacity-90 transition-opacity mb-2"
+                  >
+                    회원가입하고 시작하기
+                  </button>
+                  <button
+                    onClick={() => { setShowAlertModal(false); setAlertSubmitted(false); setAlertEmail(''); setAlertTarget(''); }}
+                    className="w-full py-2 text-gray-500 text-sm"
+                  >
+                    나중에 할게요
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

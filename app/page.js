@@ -184,6 +184,12 @@ export default function PublicLanding() {
     minimumPips: 5,   // 최소 5전단위
   });
 
+  // Alert Modal State
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [alertEmail, setAlertEmail] = useState('');
+  const [alertTarget, setAlertTarget] = useState('');
+  const [alertSubmitted, setAlertSubmitted] = useState(false);
+
   // Survey State (4 steps)
   const [showSurvey, setShowSurvey] = useState(false);
   const [surveyStep, setSurveyStep] = useState(1);
@@ -328,34 +334,47 @@ export default function PublicLanding() {
     try {
       // 1. 네이버 스팟 환율 가져오기
       let spotRateValue = null;
+      
+      // 1-1. 네이버 API 시도
       try {
         const naverRes = await fetch('/api/naver-rates');
         if (naverRes.ok) {
           const naverData = await naverRes.json();
-          if (naverData.rates?.USDKRW) {
+          if (naverData.rates?.USDKRW?.rate) {
             spotRateValue = naverData.rates.USDKRW.rate;
-            setSpotRate(spotRateValue);
+            console.log('✅ Naver spot rate:', spotRateValue);
           }
         }
       } catch (e) {
-        console.warn('Naver rates fetch failed, trying Supabase...');
-        // Supabase fallback
+        console.warn('Naver API failed:', e);
+      }
+      
+      // 1-2. 네이버 실패하면 Supabase spot_rates 시도
+      if (!spotRateValue) {
         try {
           const sbRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&source=eq.naver&order=fetched_at.desc&limit=1`,
+            `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&order=fetched_at.desc&limit=1`,
             { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
           );
           if (sbRes.ok) {
             const sbData = await sbRes.json();
-            if (sbData.length > 0) {
+            if (sbData.length > 0 && sbData[0].rate) {
               spotRateValue = sbData[0].rate;
-              setSpotRate(spotRateValue);
+              console.log('✅ Supabase spot rate:', spotRateValue);
             }
           }
         } catch (e2) {
           console.warn('Supabase spot rate failed:', e2);
         }
       }
+      
+      // 1-3. 최종 fallback - 현재 시장 근사값
+      if (!spotRateValue) {
+        spotRateValue = 1443.00;
+        console.log('⚠️ Using fallback spot rate:', spotRateValue);
+      }
+      
+      setSpotRate(spotRateValue);
 
       // 2. IPS 스왑포인트 가져오기
       let swapPointsData = null;
@@ -418,9 +437,10 @@ export default function PublicLanding() {
                 }
               },
               spotRates: {
-                USDKRW: spotRateValue || 1443.10,
+                USDKRW: spotRateValue,
               }
             };
+            console.log('✅ IPS swap points loaded');
           }
         }
       } catch (e) {
@@ -464,9 +484,10 @@ export default function PublicLanding() {
                   }
                 },
                 spotRates: {
-                  USDKRW: spotRateValue || 1443.10,
+                  USDKRW: spotRateValue,
                 }
               };
+              console.log('✅ Supabase swap points loaded');
             }
           }
         } catch (e) {
@@ -474,14 +495,18 @@ export default function PublicLanding() {
         }
       }
 
-      // 4. 최후의 fallback - 정적 JSON
+      // 4. 최후의 fallback - 정적 JSON (스팟환율은 무조건 현재값으로 덮어쓰기)
       if (!swapPointsData) {
         const res = await fetch('/config/curves/20200302_IW.json');
         if (res.ok) {
           swapPointsData = await res.json();
-          if (spotRateValue) {
-            swapPointsData.spotRates = { USDKRW: spotRateValue };
-          }
+          // 반드시 현재 스팟환율로 덮어쓰기
+          swapPointsData.spotRates = { USDKRW: spotRateValue };
+          swapPointsData.metadata = {
+            ...swapPointsData.metadata,
+            source: swapPointsData.metadata?.source + ' (스왑포인트만 참고용)',
+          };
+          console.log('⚠️ Using JSON fallback with current spot rate');
         }
       }
 
@@ -836,6 +861,34 @@ export default function PublicLanding() {
               </div>
             ) : curveData ? (
               <>
+                {/* 스왑포인트 설명 */}
+                <div className="mb-6 p-4 bg-gradient-to-r from-kustody-accent/10 to-blue-500/10 border border-kustody-accent/30 rounded-xl">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">💡</span>
+                    <div>
+                      <p className="text-sm font-semibold text-kustody-text mb-1">선물환이란?</p>
+                      <p className="text-xs text-kustody-muted leading-relaxed">
+                        <strong className="text-kustody-accent">지금 환율을 고정</strong>하고, 약정한 미래 날짜에 결제하는 거래입니다.<br/>
+                        예) 3M 선물환 = 오늘 환율({spot ? formatNumber(spot, 2) : '1,442.80'})에 스왑포인트를 더해 3개월 후에 결제
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 환율 알림 설정 버튼 */}
+                <div className="mb-6 flex justify-center">
+                  <button
+                    onClick={() => {
+                      setAlertTarget(spot ? spot.toFixed(0) : '1443');
+                      setShowAlertModal(true);
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-semibold text-sm transition-all hover:shadow-lg hover:shadow-blue-600/20"
+                  >
+                    <span>🔔</span>
+                    <span>목표 환율 도달 시 알림 받기</span>
+                  </button>
+                </div>
+
                 {/* 스왑포인트 테이블 (Bid/Ask 포함) */}
                 <div className="mb-6 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
                   <table className="w-full text-sm min-w-[320px]">
@@ -1265,6 +1318,145 @@ export default function PublicLanding() {
         >
           💬
         </button>
+      )}
+
+      {/* 환율 알림 설정 모달 */}
+      {showAlertModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-kustody-surface rounded-2xl w-full max-w-md overflow-hidden border border-kustody-border shadow-2xl">
+            {/* 모달 헤더 */}
+            <div className="p-5 border-b border-kustody-border flex items-center justify-between bg-gradient-to-r from-blue-600/10 to-purple-600/10">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <span>🔔</span> 환율 알림 설정
+              </h3>
+              <button 
+                onClick={() => { setShowAlertModal(false); setAlertSubmitted(false); }}
+                className="text-kustody-muted hover:text-white text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {!alertSubmitted ? (
+              <div className="p-5 space-y-5">
+                {/* 설명 */}
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                  <p className="text-sm text-blue-300">
+                    💡 목표 환율에 도달하면 이메일로 알려드려요!<br/>
+                    <span className="text-xs text-blue-400">무료 서비스입니다.</span>
+                  </p>
+                </div>
+
+                {/* 현재 환율 표시 */}
+                <div className="bg-kustody-navy rounded-xl p-4">
+                  <div className="text-xs text-kustody-muted mb-1">현재 USD/KRW 환율</div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-lg">USD/KRW</span>
+                    <span className="text-2xl font-mono text-kustody-accent">{spot ? formatNumber(spot, 2) : '1,442.80'}</span>
+                  </div>
+                </div>
+
+                {/* 목표 환율 입력 */}
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-2">목표 환율</label>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setAlertTarget(((spot || 1442.80) * 0.99).toFixed(0))}
+                      className="px-3 py-2.5 bg-green-600/20 border border-green-600/50 rounded-lg text-xs text-green-400 hover:bg-green-600/30 transition-colors"
+                    >
+                      ▼ 1% 하락
+                    </button>
+                    <input
+                      type="number"
+                      step="1"
+                      value={alertTarget}
+                      onChange={(e) => setAlertTarget(e.target.value)}
+                      placeholder={(spot || 1442.80).toFixed(0)}
+                      className="flex-1 px-4 py-2.5 bg-kustody-dark border border-kustody-border rounded-lg text-center font-mono text-lg focus:border-kustody-accent focus:outline-none"
+                    />
+                    <button 
+                      onClick={() => setAlertTarget(((spot || 1442.80) * 1.01).toFixed(0))}
+                      className="px-3 py-2.5 bg-red-600/20 border border-red-600/50 rounded-lg text-xs text-red-400 hover:bg-red-600/30 transition-colors"
+                    >
+                      ▲ 1% 상승
+                    </button>
+                  </div>
+                </div>
+
+                {/* 이메일 입력 */}
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-2">이메일 주소</label>
+                  <input
+                    type="email"
+                    value={alertEmail}
+                    onChange={(e) => setAlertEmail(e.target.value)}
+                    placeholder="example@company.com"
+                    className="w-full px-4 py-3 bg-kustody-dark border border-kustody-border rounded-lg focus:border-kustody-accent focus:outline-none"
+                  />
+                </div>
+
+                {/* 알림 조건 */}
+                <div>
+                  <label className="block text-xs text-kustody-muted mb-2">알림 조건</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className="py-2.5 rounded-lg text-sm border bg-blue-600/20 border-blue-500 text-blue-400">
+                      도달 시 1회
+                    </button>
+                    <button className="py-2.5 rounded-lg text-sm border bg-kustody-dark border-kustody-border text-kustody-muted">
+                      매일 오전 (준비중)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 제출 버튼 */}
+                <button
+                  onClick={() => {
+                    if (alertEmail && alertTarget) {
+                      setAlertSubmitted(true);
+                      console.log('Alert request:', { email: alertEmail, target: alertTarget, pair: 'USDKRW' });
+                    }
+                  }}
+                  disabled={!alertEmail || !alertTarget}
+                  className="w-full py-3.5 bg-blue-600 rounded-xl font-bold hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  알림 설정하기
+                </button>
+              </div>
+            ) : (
+              <div className="p-6 text-center">
+                <div className="text-5xl mb-4">✅</div>
+                <h4 className="text-xl font-bold mb-2">알림이 설정되었습니다!</h4>
+                <p className="text-sm text-kustody-muted mb-6">
+                  USD/KRW가 <span className="text-kustody-accent font-mono font-bold">{formatNumber(parseFloat(alertTarget), 0)}</span>원에 도달하면<br/>
+                  <span className="text-blue-400">{alertEmail}</span>로 알림을 보내드릴게요.
+                </p>
+                
+                <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-xl p-5 mb-5 text-left">
+                  <p className="text-sm text-kustody-text mb-3 text-center">🎁 더 많은 기능이 필요하세요?</p>
+                  <ul className="text-xs text-kustody-muted space-y-2">
+                    <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 무제한 알림 설정</li>
+                    <li className="flex items-center gap-2"><span className="text-green-400">✓</span> EUR, JPY 등 다양한 통화</li>
+                    <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 스왑포인트 이론가 계산기</li>
+                    <li className="flex items-center gap-2"><span className="text-green-400">✓</span> 선물환 헤지 시뮬레이션</li>
+                  </ul>
+                </div>
+
+                <a
+                  href="/console"
+                  className="block w-full py-3.5 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl font-bold hover:opacity-90 transition-opacity mb-3"
+                >
+                  전문가 콘솔 시작하기 →
+                </a>
+                <button
+                  onClick={() => { setShowAlertModal(false); setAlertSubmitted(false); setAlertEmail(''); setAlertTarget(''); }}
+                  className="w-full py-2 text-kustody-muted text-sm hover:text-kustody-text"
+                >
+                  닫기
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
