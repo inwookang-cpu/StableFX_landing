@@ -284,8 +284,8 @@ function AboutSection() {
                   <p className="text-kustody-muted mt-1 text-sm">Years of FX Dealing Experience</p>
                 </div>
                 <div className="border-t border-kustody-border pt-6">
-                  <span className="text-3xl font-bold bg-gradient-to-r from-kustody-accent to-emerald-400 bg-clip-text text-transparent font-mono">162.5억</span>
-                  <p className="text-kustody-muted mt-1 text-sm">투자유치 실적 (트래블월렛 CFO)</p>
+                  <span className="text-3xl font-bold bg-gradient-to-r from-kustody-accent to-emerald-400 bg-clip-text text-transparent font-mono">10+</span>
+                  <p className="text-kustody-muted mt-1 text-sm">Years in Finance Industry</p>
                 </div>
                 <div className="border-t border-kustody-border pt-6">
                   <span className="text-2xl font-bold bg-gradient-to-r from-kustody-accent to-emerald-400 bg-clip-text text-transparent font-mono">KB · NH · Mizuho</span>
@@ -323,8 +323,8 @@ function AboutSection() {
                       interbank FX 시장의 pricing 메커니즘을 깊이 이해했습니다.
                     </p>
                     <p>
-                      이후 스마일게이트인베스트먼트에서 2.5년간 VC로 핀테크 투자를 담당했고, 
-                      트래블월렛 CFO로서 162.5억원 투자유치와 예비유니콘 선정을 이끌었습니다.
+                      이후 VC 투자심사역과 스타트업 CFO를 거치며 
+                      금융과 테크 양쪽의 시각을 갖추게 되었습니다.
                     </p>
                   </div>
                   

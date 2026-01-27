@@ -439,6 +439,7 @@ export default function Console() {
                 blotter={blotter}
                 fixingRate={fixingRate}
                 setFixingRate={setFixingRate}
+                sharedCurveData={sharedCurveData}
               />
             )}
             {activeTab === 'accountingRates' && (
@@ -897,21 +898,21 @@ function CurvesTab({ onCurveDataChange }) {
         }
       }
       
-      // 2. Market에서 새로 가져오기
+      // 2. Market에서 새로 가져오기 (API route 통해서 - CORS 우회)
       console.log('Market 데이터 수집 중...');
-      const response = await fetch('https://www.ips-corp.co.kr/ajax/site/market/broker_data.php', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'market_gb=FX_SWAP'
-      });
+      const response = await fetch('/api/ips-swap');
       
       if (!response.ok) {
         throw new Error('Market API 오류');
       }
       
-      const data = await response.json();
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Market API 실패');
+      }
+      
+      const data = result.data;
       
       if (!data.broker || data.broker.length === 0) {
         throw new Error('Market 데이터 없음');
@@ -3680,10 +3681,10 @@ function SpreadSettingsSection() {
       {/* 예시 */}
       <div className="p-3 bg-kustody-dark/50 rounded-lg">
         <p className="text-xs text-kustody-muted">
-          <strong>적용 예시:</strong><br/>
-          • O/N (1일), {mode === 'uniform' ? uniformBp : tenorBp['ON']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['ON']) / 10000 * 1193.85 * 1 / 360 * 100).toFixed(2)}전단위 → <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span><br/>
-          • 1M (33일), {mode === 'uniform' ? uniformBp : tenorBp['1M']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1193.85 * 33 / 360 * 100).toFixed(2)}전단위 → {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1193.85 * 33 / 360 * 100) < minimumPips ? <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span> : '그대로 적용'}<br/>
-          • 1Y (365일), {mode === 'uniform' ? uniformBp : tenorBp['1Y']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1Y']) / 10000 * 1193.85 * 365 / 360 * 100).toFixed(2)}전단위 → 그대로 적용
+          <strong>적용 예시 (Spot 1,443 기준):</strong><br/>
+          • O/N (1일), {mode === 'uniform' ? uniformBp : tenorBp['ON']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['ON']) / 10000 * 1443 * 1 / 360 * 100).toFixed(2)}전단위 → <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span><br/>
+          • 1M (33일), {mode === 'uniform' ? uniformBp : tenorBp['1M']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1443 * 33 / 360 * 100).toFixed(2)}전단위 → {((mode === 'uniform' ? uniformBp : tenorBp['1M']) / 10000 * 1443 * 33 / 360 * 100) < minimumPips ? <span className="text-kustody-accent">Minimum {minimumPips}전단위 적용</span> : '그대로 적용'}<br/>
+          • 1Y (365일), {mode === 'uniform' ? uniformBp : tenorBp['1Y']}bp → 계산값 약 {((mode === 'uniform' ? uniformBp : tenorBp['1Y']) / 10000 * 1443 * 365 / 360 * 100).toFixed(2)}전단위 → 그대로 적용
         </p>
       </div>
     </div>
@@ -4491,7 +4492,8 @@ function AdvisoryTab({ config, addTrade, selectedClientId, setSelectedClientId, 
     if (saved) try { setQueryLog(JSON.parse(saved)); } catch(e) {}
   }, [sharedCurveData]);
 
-  const spot = curveData?.spotRates?.USDKRW || 1193.87;
+  // Spot 환율: liveSpot(네이버 실시간) > curveData > fallback
+  const spot = liveSpot || curveData?.spotRates?.USDKRW || 1443.00;
   const fxSwapPoints = curveData?.curves?.USDKRW?.fxSwapPoints || [];
 
   // 선택된 고객
@@ -5889,7 +5891,7 @@ function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientI
             <tr key={i} className="border-b border-kustody-border/30">
               <td className="py-2 px-2 font-mono">{r.date}</td>
               <td className={`py-2 px-2 text-right font-mono ${r.sum >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.sum, 0)}</td>
-              <td className="py-2 px-2 text-right font-mono text-kustody-muted">{r.df.toFixed(8)}</td>
+              <td className="py-2 px-2 text-right font-mono text-kustody-muted">{r.df.toFixed(10)}</td>
               <td className={`py-2 px-2 text-right font-mono ${r.npv >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatNumber(r.npv, 2)}</td>
               <td className="py-2 px-2 text-right font-mono text-purple-400">{r.SWAP !== 0 ? formatNumber(r.SWAP, 0) : '-'}</td>
               <td className="py-2 px-2 text-right font-mono text-green-400">{r.OUTRIGHT !== 0 ? formatNumber(r.OUTRIGHT, 0) : '-'}</td>
@@ -5903,116 +5905,283 @@ function CashScheduleTab({ blotter, config, selectedClientId, setSelectedClientI
 }
 
 // ==================== Valuation Tab ====================
-function ValuationTab({ blotter, fixingRate, setFixingRate }) {
+function ValuationTab({ blotter, fixingRate, setFixingRate, sharedCurveData }) {
   const [curveData, setCurveData] = useState(null);
   const [valuationDate, setValuationDate] = useState(new Date().toISOString().split('T')[0]);
-  const [decimalPlaces, setDecimalPlaces] = useState(2);
-  const [showFull, setShowFull] = useState(false);
-  useEffect(() => { fetch('/config/curves/20260127_IW.json').then(res => res.ok ? res.json() : null).then(data => setCurveData(data)); }, []);
-
-  // rate → DF 계산
-  // USD: ACT/360, KRW: ACT/365
-  const rateToDf = (rate, days, dayCountBase) => {
-    if (days <= 0) return 1;
-    return 1 / (1 + (rate / 100) * (days / dayCountBase));
-  };
-
-  // LN(DF) 보간 함수 (Log-Linear Interpolation)
-  const interpolateDfLogLinear = (tenors, targetDays, dayCountBase) => {
-    if (!tenors || tenors.length === 0) return 1;
-    if (targetDays <= 0) return 1;
+  const [decimalPlaces, setDecimalPlaces] = useState(10); // 기본 10자리
+  const [showFull, setShowFull] = useState(true); // 기본 10자리 표시
+  const [curveSource, setCurveSource] = useState('loading...');
+  const [spotDays, setSpotDays] = useState(2); // T+2 기본
+  
+  // ========== 정밀도 표준 ==========
+  // 내부 계산: JavaScript 그대로 (~15자리) - 오차 누적 방지
+  // 출력: 10자리로 표시
+  
+  // sharedCurveData (Curves 탭에서 계산된 데이터) 우선 사용
+  useEffect(() => {
+    if (sharedCurveData) {
+      setCurveData(sharedCurveData);
+      setCurveSource('Curves 탭 (실시간)');
+      
+      // Spot Date 계산해서 spotDays 설정
+      const spotDateStr = sharedCurveData.curves?.USDKRW?.USD?.spotDate;
+      if (spotDateStr && valuationDate) {
+        const spotDate = new Date(spotDateStr);
+        const valDate = new Date(valuationDate);
+        const diffDays = Math.round((spotDate - valDate) / (1000 * 60 * 60 * 24));
+        setSpotDays(diffDays > 0 ? diffDays : 2);
+      }
+      return;
+    }
     
-    // days가 0 이상인 것만 필터링하고 정렬
+    // Fallback: Supabase 또는 JSON
+    const loadCurveData = async () => {
+      try {
+        const [usdRes, krwRes] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/usd_rates?order=tenor.asc`, {
+            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+          }),
+          fetch(`${SUPABASE_URL}/rest/v1/krw_rates?order=tenor.asc`, {
+            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+          })
+        ]);
+        
+        if (usdRes.ok && krwRes.ok) {
+          const usdRates = await usdRes.json();
+          const krwRates = await krwRes.json();
+          
+          if (usdRates.length > 0 && krwRates.length > 0) {
+            const tenorToDays = (tenor) => {
+              const map = { 'ON': -1, 'TN': 0, '1W': 7, '2W': 14, '1M': 30, '2M': 60, '3M': 90, '6M': 180, '9M': 270, '1Y': 365, '2Y': 730 };
+              return map[tenor] ?? 30;
+            };
+            
+            // Rate에서 DF 계산
+            const rateToDf = (rate, days, dayCount) => {
+              if (days <= 0) return 1;
+              return 1 / (1 + (rate / 100) * (days / dayCount));
+            };
+            
+            const usdTenors = usdRates.map(r => {
+              const days = tenorToDays(r.tenor);
+              return {
+                tenor: r.tenor,
+                days: days,
+                rate: r.rate,
+                df: rateToDf(r.rate, days, 360)
+              };
+            });
+            
+            const krwTenors = krwRates.map(r => {
+              const days = tenorToDays(r.tenor);
+              return {
+                tenor: r.tenor,
+                days: days,
+                rate: r.rate,
+                df: rateToDf(r.rate, days, 365)
+              };
+            });
+            
+            setCurveData({
+              curves: {
+                USDKRW: {
+                  USD: { tenors: usdTenors },
+                  KRW: { tenors: krwTenors }
+                }
+              }
+            });
+            setCurveSource('Supabase');
+            return;
+          }
+        }
+        
+        // JSON fallback
+        const jsonRes = await fetch('/config/curves/20260127_IW.json');
+        if (jsonRes.ok) {
+          const data = await jsonRes.json();
+          setCurveData(data);
+          setCurveSource('JSON (fallback)');
+        }
+      } catch (e) {
+        console.error('Curve load error:', e);
+      }
+    };
+    
+    loadCurveData();
+  }, [sharedCurveData, valuationDate]);
+
+  // DF 보간 함수 (Log-Linear) - 이미 계산된 DF 사용
+  const interpolateDf = (tenors, targetDays) => {
+    if (!tenors || tenors.length === 0) return 1;
+    
+    // DF가 있는 tenor만 필터링
     const sorted = [...tenors]
-      .filter(t => t.days >= 0)
-      .map(t => ({
-        ...t,
-        df: rateToDf(t.rate, t.days, dayCountBase),
-        lnDf: Math.log(rateToDf(t.rate, t.days, dayCountBase))
-      }))
+      .filter(t => t.df !== undefined && t.df !== null)
       .sort((a, b) => a.days - b.days);
     
     if (sorted.length === 0) return 1;
     
-    // 범위 체크
-    if (targetDays <= sorted[0].days) {
-      // 첫 번째 포인트 이전: 첫 번째 rate로 계산
-      return rateToDf(sorted[0].rate, targetDays, dayCountBase);
-    }
-    if (targetDays >= sorted[sorted.length - 1].days) {
-      // 마지막 포인트 이후: flat extrapolation
-      return rateToDf(sorted[sorted.length - 1].rate, targetDays, dayCountBase);
+    // 정확히 일치하는 tenor 먼저 찾기
+    const exact = sorted.find(t => t.days === targetDays);
+    if (exact) return exact.df;
+    
+    // 범위 밖 - 첫 번째 포인트 이전
+    if (targetDays < sorted[0].days) {
+      // 비례 외삽 (음수 days 포함)
+      if (sorted[0].days === 0) return sorted[0].df;
+      const lnDf = Math.log(sorted[0].df);
+      return Math.exp(lnDf * targetDays / sorted[0].days);
     }
     
-    // LN(DF) 보간
+    // 범위 밖 - 마지막 포인트 이후
+    if (targetDays > sorted[sorted.length - 1].days) {
+      return sorted[sorted.length - 1].df;
+    }
+    
+    // Log-linear 보간
     for (let i = 0; i < sorted.length - 1; i++) {
-      if (sorted[i].days <= targetDays && sorted[i + 1].days >= targetDays) {
-        const ratio = (targetDays - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
-        const lnDfInterp = sorted[i].lnDf + (sorted[i + 1].lnDf - sorted[i].lnDf) * ratio;
-        return Math.exp(lnDfInterp);
+      if (targetDays >= sorted[i].days && targetDays <= sorted[i + 1].days) {
+        const t = (targetDays - sorted[i].days) / (sorted[i + 1].days - sorted[i].days);
+        const lnDfLower = Math.log(sorted[i].df);
+        const lnDfUpper = Math.log(sorted[i + 1].df);
+        return Math.exp(lnDfLower + (lnDfUpper - lnDfLower) * t);
       }
     }
     
     return 1;
   };
 
-  // Forward Rate 계산: Spot × USD_DF / KRW_DF
-  const getForwardRate = (days) => {
-    if (!curveData) return fixingRate;
-    
-    const usdTenors = curveData.curves?.USDKRW?.USD?.tenors || [];
-    const krwTenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
-    
-    // USD DF (ACT/360)
-    const usdDf = interpolateDfLogLinear(usdTenors, days, 360);
-    
-    // KRW DF (ACT/365)
-    const krwDf = interpolateDfLogLinear(krwTenors, days, 365);
-    
-    // Forward = Spot × USD_DF / KRW_DF
-    return fixingRate * usdDf / krwDf;
-  };
-
-  // Rebased DF (Today=1 기준)
-  // Today (days=0)의 DF로 나눠서 Today가 1이 되도록 함
-  const getRebasedDF = (days) => {
+  // Rebased DF 계산
+  // Curves 탭: Spot Date 기준 DF=1
+  // Valuation: Today (valuationDate) 기준 DF=1로 rebasing
+  // 
+  // curvesDays = daysFromValuation - spotDays
+  // todayRatio = USD_DF(-spotDays) / KRW_DF(-spotDays)  (Today는 Spot보다 spotDays일 전)
+  // rebasedDF = (USD_DF / KRW_DF) / todayRatio
+  const getRebasedDF = (daysFromValuation) => {
     if (!curveData) return 1;
     
     const usdTenors = curveData.curves?.USDKRW?.USD?.tenors || [];
     const krwTenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
     
-    // Today (days=0) 기준 DF 계산
-    const usdDf0 = interpolateDfLogLinear(usdTenors, 0, 360);
-    const krwDf0 = interpolateDfLogLinear(krwTenors, 0, 365);
-    const todayRatio = usdDf0 / krwDf0; // Today의 USD_DF/KRW_DF
+    if (usdTenors.length === 0 || krwTenors.length === 0) return 1;
     
-    // Target days의 DF 계산
-    const usdDf = interpolateDfLogLinear(usdTenors, days, 360);
-    const krwDf = interpolateDfLogLinear(krwTenors, days, 365);
-    const targetRatio = usdDf / krwDf; // Target의 USD_DF/KRW_DF
+    // Curves는 Spot Date 기준 days
+    // Today는 Spot보다 spotDays일 전 → curvesDays = -spotDays
+    const todayCurvesDays = -spotDays;
     
-    // Rebase: Today=1 기준
-    return targetRatio / todayRatio;
+    // Today의 ratio (이 값이 1.000024 같은 값)
+    const usdDfToday = interpolateDf(usdTenors, todayCurvesDays);
+    const krwDfToday = interpolateDf(krwTenors, todayCurvesDays);
+    const todayRatio = usdDfToday / krwDfToday;
+    
+    // Target의 curvesDays
+    const targetCurvesDays = daysFromValuation - spotDays;
+    
+    // Target의 ratio
+    const usdDfTarget = interpolateDf(usdTenors, targetCurvesDays);
+    const krwDfTarget = interpolateDf(krwTenors, targetCurvesDays);
+    const targetRatio = usdDfTarget / krwDfTarget;
+    
+    // Rebased: Today=1
+    const rebasedDf = targetRatio / todayRatio;
+    
+    return rebasedDf;
   };
 
-  const dailyRates = (() => { const rates = [], today = new Date(valuationDate); for (let d = 0; d <= 730; d++) { const date = new Date(today); date.setDate(date.getDate() + d); const df = getRebasedDF(d); const forwardRate = fixingRate * df; rates.push({ date: date.toISOString().split('T')[0], days: d, df, forwardRate }); } return rates; })();
+  // Daily Forward Rates 계산 (valuationDate부터 730일)
+  const dailyRates = (() => {
+    const rates = [];
+    const today = new Date(valuationDate);
+    
+    for (let d = 0; d <= 730; d++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() + d);
+      
+      const df = getRebasedDF(d);
+      const forwardRate = fixingRate * df;
+      
+      rates.push({
+        date: date.toISOString().split('T')[0],
+        days: d,
+        df,
+        forwardRate
+      });
+    }
+    return rates;
+  })();
 
-  const evalTrades = (() => { const today = new Date(valuationDate); return blotter.filter(t => new Date(t.settlementDate) > today).map(t => { const days = Math.round((new Date(t.settlementDate) - today) / 864e5); const df = getRebasedDF(days); const evalRate = fixingRate * df; const pnl = (evalRate - (parseFloat(t.rate) || 0)) * (t.ccy1Amt || 0); return { ...t, days, df, evalRate, pnl }; }); })();
+  // Blotter 평가
+  const evalTrades = (() => {
+    const today = new Date(valuationDate);
+    return blotter
+      .filter(t => new Date(t.settlementDate) > today)
+      .map(t => {
+        const days = Math.round((new Date(t.settlementDate) - today) / 864e5);
+        const df = getRebasedDF(days);
+        const evalRate = fixingRate * df;
+        const pnl = (evalRate - (parseFloat(t.rate) || 0)) * (t.ccy1Amt || 0);
+        return { ...t, days, df, evalRate, pnl };
+      });
+  })();
+  
   const totalPnL = evalTrades.reduce((s, t) => s + t.pnl, 0);
 
-  const downloadCSV = () => { const h = 'Date,Days,DF,Forward_Rate\n'; const r = dailyRates.map(x => `${x.date},${x.days},${x.df.toFixed(decimalPlaces)},${x.forwardRate.toFixed(decimalPlaces)}`).join('\n'); const b = new Blob([h + r], { type: 'text/csv' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `valuation_${valuationDate}_${decimalPlaces}dp.csv`; a.click(); URL.revokeObjectURL(u); };
-  const fmt = (n, f = null) => n.toFixed(f ?? (showFull ? 8 : 2));
+  const downloadCSV = () => { 
+    const h = 'Date,Days,DF_Rebased,Forward_Rate\n'; 
+    const r = dailyRates.map(x => `${x.date},${x.days},${x.df.toFixed(decimalPlaces)},${x.forwardRate.toFixed(decimalPlaces)}`).join('\n'); 
+    const b = new Blob([h + r], { type: 'text/csv' }); 
+    const u = URL.createObjectURL(b); 
+    const a = document.createElement('a'); 
+    a.href = u; 
+    a.download = `valuation_${valuationDate}_${decimalPlaces}dp.csv`; 
+    a.click(); 
+    URL.revokeObjectURL(u); 
+  };
+  
+  const fmt = (n, f = null) => n.toFixed(f ?? (showFull ? 10 : 4));
+  
+  // Today ratio 계산 (디버깅/표시용)
+  const getTodayRatio = () => {
+    if (!curveData) return 1;
+    const usdTenors = curveData.curves?.USDKRW?.USD?.tenors || [];
+    const krwTenors = curveData.curves?.USDKRW?.KRW?.tenors || [];
+    if (usdTenors.length === 0 || krwTenors.length === 0) return 1;
+    
+    const todayCurvesDays = -spotDays;
+    const usdDfToday = interpolateDf(usdTenors, todayCurvesDays);
+    const krwDfToday = interpolateDf(krwTenors, todayCurvesDays);
+    return usdDfToday / krwDfToday;
+  };
+  const todayRatio = getTodayRatio();
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div><h2 className="text-xl font-semibold">📊 IFRS Valuation</h2><p className="text-sm text-kustody-muted mt-1">공정가치 평가 및 고시</p></div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">📊 IFRS Valuation</h2>
+          <p className="text-sm text-kustody-muted mt-1">공정가치 평가 및 고시 (커브: {curveSource}, Spot T+{spotDays})</p>
+        </div>
+      </div>
       <div className="bg-kustody-surface rounded-xl p-5"><div className="grid grid-cols-4 gap-4">
-        <div><label className="block text-xs text-kustody-muted mb-1">평가일</label><input type="date" value={valuationDate} onChange={(e) => setValuationDate(e.target.value)} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
-        <div><label className="block text-xs text-kustody-muted mb-1">재무환율 (매매기준율)</label><input type="number" step="0.01" value={fixingRate} onChange={(e) => setFixingRate(parseFloat(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
-        <div><label className="block text-xs text-kustody-muted mb-1">CSV 소수점</label><select value={decimalPlaces} onChange={(e) => setDecimalPlaces(parseInt(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"><option value={2}>2자리</option><option value={4}>4자리</option><option value={6}>6자리</option><option value={8}>8자리</option></select></div>
-        <div className="flex items-end gap-2"><button onClick={() => setShowFull(!showFull)} className={`px-3 py-2 rounded-lg text-sm ${showFull ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-navy'}`}>{showFull ? '8자리' : '2자리'}</button><button onClick={downloadCSV} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold">📥 CSV</button></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">평가일 (Today=1 기준)</label><input type="date" value={valuationDate} onChange={(e) => setValuationDate(e.target.value)} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">재무환율 (Accounting Rate USD)</label><input type="number" step="0.01" value={fixingRate} onChange={(e) => setFixingRate(parseFloat(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg font-mono" /></div>
+        <div><label className="block text-xs text-kustody-muted mb-1">CSV 소수점</label><select value={decimalPlaces} onChange={(e) => setDecimalPlaces(parseInt(e.target.value))} className="w-full px-3 py-2 bg-kustody-dark border border-kustody-border rounded-lg"><option value={6}>6자리</option><option value={8}>8자리</option><option value={10}>10자리</option></select></div>
+        <div className="flex items-end gap-2"><button onClick={() => setShowFull(!showFull)} className={`px-3 py-2 rounded-lg text-sm ${showFull ? 'bg-kustody-accent text-kustody-dark' : 'bg-kustody-navy'}`}>{showFull ? '10자리' : '4자리'}</button><button onClick={downloadCSV} className="px-4 py-2 bg-kustody-accent text-kustody-dark rounded-lg font-semibold">📥 CSV</button></div>
       </div></div>
-      <div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">📈 Daily Forward Rate (Today=1, 재무환율×DF)</h3><div className="overflow-x-auto max-h-96">
+      
+      {/* 계산 로직 설명 */}
+      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 text-sm">
+        <p className="text-blue-300 mb-2">📐 <strong>Forward Rate 계산 로직 (Today Rebasing)</strong></p>
+        <ul className="text-blue-200/80 text-xs space-y-1">
+          <li>• Curves 탭: Spot Date (T+{spotDays}) 기준 DF=1</li>
+          <li>• Today (T+0) 원본 ratio = USD_DF / KRW_DF = <span className="font-mono text-yellow-300">{todayRatio.toFixed(10)}</span></li>
+          <li>• <strong>Rebased DF(d) = 원본 ratio(d) / Today 원본 ratio</strong> → Today DF = 1</li>
+          <li>• Forward Rate = 재무환율 ({formatNumber(fixingRate, 2)}) × Rebased DF</li>
+        </ul>
+      </div>
+      
+      <div className="bg-kustody-surface rounded-xl p-5"><h3 className="font-semibold mb-4">📈 Daily Forward Rate (평가일={valuationDate}, Today DF=1)</h3><div className="overflow-x-auto max-h-96">
         <table className="w-full text-sm"><thead className="sticky top-0 bg-kustody-surface"><tr className="text-kustody-muted text-xs border-b border-kustody-border"><th className="text-left py-2 px-2">Date</th><th className="text-right py-2 px-2">Days</th><th className="text-right py-2 px-2">DF (Rebased)</th><th className="text-right py-2 px-2">Forward Rate</th></tr></thead>
         <tbody>{dailyRates.slice(0, 100).map((r, i) => (<tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20"><td className="py-1 px-2 font-mono text-xs">{r.date}</td><td className="py-1 px-2 text-right font-mono text-kustody-muted">{r.days}</td><td className="py-1 px-2 text-right font-mono">{fmt(r.df, 8)}</td><td className="py-1 px-2 text-right font-mono text-kustody-accent">{fmt(r.forwardRate)}</td></tr>))}</tbody></table>
         <p className="text-xs text-kustody-muted mt-2 text-center">처음 100일만 표시 (CSV로 전체 다운로드)</p>

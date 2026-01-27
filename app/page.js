@@ -12,6 +12,10 @@ import {
 } from '../lib/dateCalculator';
 import StableFXLanding from './components/StableFXLanding';
 
+// Supabase 설정
+const SUPABASE_URL = 'https://dxenbwvhxdcgtdivjhpa.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4ZW5id3ZoeGRjZ3RkaXZqaHBhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxNTI3MjMsImV4cCI6MjA2MzcyODcyM30.sb_publishable_jmXQn-qfWdQ6XNOW9preiQ_bHgXbHxO';
+
 const DEFAULT_HOLIDAYS = {
   KR: [
     {"date": "2025-01-01", "name": "신정"},
@@ -162,11 +166,22 @@ export default function PublicLanding() {
   const [curveData, setCurveData] = useState(null);
   const [curveLoading, setCurveLoading] = useState(false);
   const [interpDate, setInterpDate] = useState('');
+  const [spotRate, setSpotRate] = useState(null); // 네이버 실시간 환율
   const [spreadSettings, setSpreadSettings] = useState({
-    mode: 'uniform',
-    uniformBp: 5,
-    tenorBp: { 'ON': 20, 'TN': 15, '1W': 10, '1M': 5, '2M': 5, '3M': 5, '6M': 5, '1Y': 5, '2Y': 5 },
-    minimumPips: 1,
+    mode: 'byTenor',  // Tier4: 테너별 차등 스프레드
+    uniformBp: 20,    // Tier4 기본: 20bp
+    tenorBp: { 
+      'ON': 50,   // O/N: 50bp (단기 변동성)
+      'TN': 40,   // T/N: 40bp
+      '1W': 30,   // 1W: 30bp
+      '1M': 20,   // 1M: 20bp
+      '2M': 18,   // 2M: 18bp
+      '3M': 15,   // 3M: 15bp
+      '6M': 12,   // 6M: 12bp
+      '1Y': 10,   // 1Y: 10bp
+      '2Y': 8     // 2Y: 8bp
+    },
+    minimumPips: 5,   // 최소 5전단위
   });
 
   // Survey State (4 steps)
@@ -305,25 +320,182 @@ export default function PublicLanding() {
     setIsCalculating(false);
   };
 
-  // 스왑포인트 데이터 로드
+  // 스왑포인트 및 스팟 환율 로드
   const loadSwapPoints = async () => {
     setCurveLoading(true);
     trackUsage('swap_points_load', { action: 'refresh' });
     
     try {
-      const res = await fetch('/config/curves/20200302_IW.json');
-      if (res.ok) {
-        const data = await res.json();
-        setCurveData(data);
-        const spotDate = data.curves?.USDKRW?.USD?.spotDate;
-        if (spotDate) {
-          const d = new Date(spotDate);
+      // 1. 네이버 스팟 환율 가져오기
+      let spotRateValue = null;
+      try {
+        const naverRes = await fetch('/api/naver-rates');
+        if (naverRes.ok) {
+          const naverData = await naverRes.json();
+          if (naverData.rates?.USDKRW) {
+            spotRateValue = naverData.rates.USDKRW.rate;
+            setSpotRate(spotRateValue);
+          }
+        }
+      } catch (e) {
+        console.warn('Naver rates fetch failed, trying Supabase...');
+        // Supabase fallback
+        try {
+          const sbRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&source=eq.naver&order=fetched_at.desc&limit=1`,
+            { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+          );
+          if (sbRes.ok) {
+            const sbData = await sbRes.json();
+            if (sbData.length > 0) {
+              spotRateValue = sbData[0].rate;
+              setSpotRate(spotRateValue);
+            }
+          }
+        } catch (e2) {
+          console.warn('Supabase spot rate failed:', e2);
+        }
+      }
+
+      // 2. IPS 스왑포인트 가져오기
+      let swapPointsData = null;
+      try {
+        const ipsRes = await fetch('/api/ips-swap');
+        if (ipsRes.ok) {
+          const ipsData = await ipsRes.json();
+          if (ipsData.success && ipsData.data?.broker?.length > 0) {
+            // IPS 데이터 파싱
+            const brokerData = ipsData.data.broker;
+            const tenorMap = [
+              { tenor: 'O/N', key: 'ON', days: -1 },
+              { tenor: 'T/N', key: 'TN', days: 0 },
+              { tenor: '1W', key: '1W', days: 7 },
+              { tenor: '2W', key: '2W', days: 14 },
+              { tenor: '1M', key: '1M', days: 30 },
+              { tenor: '2M', key: '2M', days: 60 },
+              { tenor: '3M', key: '3M', days: 90 },
+              { tenor: '6M', key: '6M', days: 180 },
+              { tenor: '9M', key: '9M', days: 270 },
+              { tenor: '1Y', key: '1Y', days: 365 },
+            ];
+
+            const fxSwapPoints = [];
+            tenorMap.forEach((tm, idx) => {
+              if (brokerData[idx]) {
+                const row = brokerData[idx];
+                // mid 값 계산 (bid + ask) / 2
+                const bid = parseFloat(row.b_bid) || 0;
+                const ask = parseFloat(row.b_ask) || 0;
+                const mid = (bid + ask) / 2;
+                
+                fxSwapPoints.push({
+                  tenor: tm.tenor,
+                  days: tm.days > 0 ? tm.days : 1,
+                  points: mid / 100, // 전단위 → 원단위
+                  bid: bid / 100,
+                  ask: ask / 100,
+                });
+              }
+            });
+
+            // Spot date 계산 (T+2)
+            const today = new Date();
+            const spotDate = new Date(today);
+            spotDate.setDate(spotDate.getDate() + 2);
+            while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
+              spotDate.setDate(spotDate.getDate() + 1);
+            }
+
+            swapPointsData = {
+              metadata: {
+                referenceDate: today.toISOString().split('T')[0],
+                source: 'IPS Corp (실시간)',
+              },
+              curves: {
+                USDKRW: {
+                  USD: { spotDate: spotDate.toISOString().split('T')[0] },
+                  fxSwapPoints: fxSwapPoints,
+                }
+              },
+              spotRates: {
+                USDKRW: spotRateValue || 1443.10,
+              }
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('IPS swap points fetch failed:', e);
+      }
+
+      // 3. 데이터가 없으면 Supabase에서 가져오기
+      if (!swapPointsData) {
+        try {
+          const sbRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/fx_swap_points?order=tenor.asc`,
+            { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+          );
+          if (sbRes.ok) {
+            const sbData = await sbRes.json();
+            if (sbData.length > 0) {
+              const fxSwapPoints = sbData.map(row => ({
+                tenor: row.tenor,
+                days: row.days || 30,
+                points: row.mid_points,
+                bid: row.bid_points,
+                ask: row.ask_points,
+              }));
+              
+              const today = new Date();
+              const spotDate = new Date(today);
+              spotDate.setDate(spotDate.getDate() + 2);
+              while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
+                spotDate.setDate(spotDate.getDate() + 1);
+              }
+
+              swapPointsData = {
+                metadata: {
+                  referenceDate: today.toISOString().split('T')[0],
+                  source: 'Supabase DB',
+                },
+                curves: {
+                  USDKRW: {
+                    USD: { spotDate: spotDate.toISOString().split('T')[0] },
+                    fxSwapPoints: fxSwapPoints,
+                  }
+                },
+                spotRates: {
+                  USDKRW: spotRateValue || 1443.10,
+                }
+              };
+            }
+          }
+        } catch (e) {
+          console.warn('Supabase swap points failed:', e);
+        }
+      }
+
+      // 4. 최후의 fallback - 정적 JSON
+      if (!swapPointsData) {
+        const res = await fetch('/config/curves/20200302_IW.json');
+        if (res.ok) {
+          swapPointsData = await res.json();
+          if (spotRateValue) {
+            swapPointsData.spotRates = { USDKRW: spotRateValue };
+          }
+        }
+      }
+
+      if (swapPointsData) {
+        setCurveData(swapPointsData);
+        const spotDateStr = swapPointsData.curves?.USDKRW?.USD?.spotDate;
+        if (spotDateStr) {
+          const d = new Date(spotDateStr);
           d.setMonth(d.getMonth() + 1);
           setInterpDate(d.toISOString().split('T')[0]);
         }
       }
     } catch (e) {
-      console.error('Failed to load curve data:', e);
+      console.error('Failed to load swap points:', e);
     }
     setCurveLoading(false);
   };
@@ -383,7 +555,7 @@ export default function PublicLanding() {
       points = lower.points + (upper.points - lower.points) * t;
     }
     
-    const spot = curveData.spotRates?.USDKRW || 1193.85;
+    const spot = spotRate || curveData.spotRates?.USDKRW || 1443.10;
     
     // 테너별 bp + minimum 적용
     const tenorBp = spreadSettings.mode === 'uniform' 
@@ -421,7 +593,7 @@ export default function PublicLanding() {
     return spreadSettings.tenorBp[normalizedTenor] || spreadSettings.uniformBp;
   };
 
-  const spot = curveData?.spotRates?.USDKRW || 1193.85;
+  const spot = spotRate || curveData?.spotRates?.USDKRW || 1443.10;
   const interpCalc = calculateInterpolation();
 
   // Navigation handler for landing page
@@ -635,42 +807,47 @@ export default function PublicLanding() {
 
         {/* Swap Point */}
         {activeSection === 'interpolation' && (
-          <div className="bg-kustody-surface rounded-2xl p-8 shadow-xl">
-            <div className="flex items-center justify-between mb-6">
+          <div className="bg-kustody-surface rounded-2xl p-4 md:p-8 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 md:mb-6 gap-3">
               <div>
-                <h2 className="text-2xl font-semibold text-kustody-text">📊 스왑포인트 조회</h2>
-                <p className="text-kustody-muted text-sm mt-1">
-                  기준일: {curveData?.metadata?.referenceDate || '-'} | Spot: {formatNumber(spot, 2)}
+                <h2 className="text-xl md:text-2xl font-semibold text-kustody-text">📊 스왑포인트 조회</h2>
+                <p className="text-kustody-muted text-xs md:text-sm mt-1">
+                  기준일: {curveData?.metadata?.referenceDate || new Date().toISOString().split('T')[0]} | Spot: <span className="text-kustody-accent font-mono">{formatNumber(spot, 2)}</span>
                 </p>
+                {curveData?.metadata?.source && (
+                  <p className="text-kustody-muted text-xs mt-0.5">
+                    출처: {curveData.metadata.source}
+                  </p>
+                )}
               </div>
               <button
                 onClick={loadSwapPoints}
                 disabled={curveLoading}
-                className="px-4 py-2 bg-kustody-navy border border-kustody-border rounded-lg text-sm hover:border-kustody-accent transition-colors disabled:opacity-50"
+                className="px-3 py-2 md:px-4 bg-kustody-navy border border-kustody-border rounded-lg text-xs md:text-sm hover:border-kustody-accent transition-colors disabled:opacity-50 self-start sm:self-auto"
               >
                 {curveLoading ? '로딩...' : '🔄 새로고침'}
               </button>
             </div>
             
             {curveLoading ? (
-              <div className="text-center py-12 text-kustody-muted">
-                <div className="text-4xl mb-4">⏳</div>
-                <p>데이터 로딩 중...</p>
+              <div className="text-center py-8 md:py-12 text-kustody-muted">
+                <div className="text-3xl md:text-4xl mb-4">⏳</div>
+                <p className="text-sm md:text-base">데이터 로딩 중...</p>
               </div>
             ) : curveData ? (
               <>
                 {/* 스왑포인트 테이블 (Bid/Ask 포함) */}
-                <div className="mb-6 overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div className="mb-6 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+                  <table className="w-full text-sm min-w-[320px]">
                     <thead>
                       <tr className="text-kustody-muted text-xs border-b border-kustody-border">
-                        <th className="text-left py-3 px-3">Tenor</th>
-                        <th className="text-center py-3 px-3">Maturity</th>
-                        <th className="text-right py-3 px-3">Days</th>
-                        <th className="text-right py-3 px-3 text-blue-400">Bid</th>
-                        <th className="text-right py-3 px-3">Mid</th>
-                        <th className="text-right py-3 px-3 text-red-400">Ask</th>
-                        <th className="text-right py-3 px-3 text-kustody-accent">Sp/Day</th>
+                        <th className="text-left py-2 md:py-3 px-2 md:px-3">Tenor</th>
+                        <th className="text-center py-2 md:py-3 px-2 md:px-3 hidden md:table-cell">Maturity</th>
+                        <th className="text-right py-2 md:py-3 px-1 md:px-3">Days</th>
+                        <th className="text-right py-2 md:py-3 px-1 md:px-3 text-blue-400">Bid</th>
+                        <th className="text-right py-2 md:py-3 px-1 md:px-3">Mid</th>
+                        <th className="text-right py-2 md:py-3 px-1 md:px-3 text-red-400">Ask</th>
+                        <th className="text-right py-2 md:py-3 px-1 md:px-3 text-kustody-accent hidden sm:table-cell">Sp/Day</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -689,13 +866,13 @@ export default function PublicLanding() {
                         
                         return (
                           <tr key={i} className="border-b border-kustody-border/30 hover:bg-kustody-navy/20">
-                            <td className="py-3 px-3 font-mono font-semibold">{p.tenor}</td>
-                            <td className="py-3 px-3 text-center font-mono text-kustody-muted">{p.maturity || '-'}</td>
-                            <td className="py-3 px-3 text-right font-mono text-kustody-muted">{displayDays}</td>
-                            <td className="py-3 px-3 text-right font-mono text-blue-400">{bidPips !== null ? bidPips : '-'}</td>
-                            <td className="py-3 px-3 text-right font-mono">{midPips !== null ? midPips : '-'}</td>
-                            <td className="py-3 px-3 text-right font-mono text-red-400">{askPips !== null ? askPips : '-'}</td>
-                            <td className="py-3 px-3 text-right font-mono text-kustody-accent">{spDay}</td>
+                            <td className="py-2 md:py-3 px-2 md:px-3 font-mono font-semibold text-xs md:text-sm">{p.tenor}</td>
+                            <td className="py-2 md:py-3 px-2 md:px-3 text-center font-mono text-kustody-muted text-xs hidden md:table-cell">{p.maturity || '-'}</td>
+                            <td className="py-2 md:py-3 px-1 md:px-3 text-right font-mono text-kustody-muted text-xs md:text-sm">{displayDays}</td>
+                            <td className="py-2 md:py-3 px-1 md:px-3 text-right font-mono text-blue-400 text-xs md:text-sm">{bidPips !== null ? bidPips : '-'}</td>
+                            <td className="py-2 md:py-3 px-1 md:px-3 text-right font-mono text-xs md:text-sm">{midPips !== null ? midPips : '-'}</td>
+                            <td className="py-2 md:py-3 px-1 md:px-3 text-right font-mono text-red-400 text-xs md:text-sm">{askPips !== null ? askPips : '-'}</td>
+                            <td className="py-2 md:py-3 px-1 md:px-3 text-right font-mono text-kustody-accent text-xs md:text-sm hidden sm:table-cell">{spDay}</td>
                           </tr>
                         );
                       })}
