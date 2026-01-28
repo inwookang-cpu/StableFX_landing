@@ -1045,9 +1045,8 @@ function CurvesTab({ onCurveDataChange }) {
     setNaverLoading(true);
     try {
       // 1. Supabase에서 먼저 조회 (GitHub Actions가 15분마다 업데이트)
-      const today = new Date().toISOString().split('T')[0];
       const supabaseResponse = await fetch(
-        `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&reference_date=eq.${today}&select=*&order=fetched_at.desc&limit=20`,
+        `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc&limit=20`,
         {
           headers: {
             'apikey': SUPABASE_ANON_KEY,
@@ -1058,14 +1057,17 @@ function CurvesTab({ onCurveDataChange }) {
       
       if (supabaseResponse.ok) {
         const supabaseData = await supabaseResponse.json();
+        console.log('📊 Supabase spot_rates:', supabaseData.length, 'records');
         
         if (supabaseData && supabaseData.length > 0) {
           const latestRecord = supabaseData[0];
           const fetchedAt = new Date(latestRecord.fetched_at);
           const ageMinutes = (now - fetchedAt.getTime()) / (1000 * 60);
           
-          // 20분 이내 데이터면 사용
-          if (ageMinutes < 20) {
+          console.log(`⏱️ Supabase data age: ${Math.round(ageMinutes)}분`);
+          
+          // 30분 이내 데이터면 사용
+          if (ageMinutes < 30) {
             const rates = {};
             supabaseData.forEach(record => {
               if (!rates[record.currency_pair]) {
@@ -1078,9 +1080,11 @@ function CurvesTab({ onCurveDataChange }) {
             
             setNaverRates(rates);
             setNaverLastUpdate(fetchedAt);
-            console.log('✅ Spot rates from Supabase:', rates, `(${Math.round(ageMinutes)}분 전)`);
+            console.log('✅ Spot rates from Supabase:', rates);
             
             return rates;
+          } else {
+            console.log('⚠️ Supabase 데이터가 30분 이상 오래됨, API 호출...');
           }
         }
       }
