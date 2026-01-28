@@ -31,13 +31,17 @@ export async function GET() {
         
         if (response.ok) {
           const data = await response.json();
-          if (data && data.closePrice) {
+          const info = data.exchangeInfo;
+          if (info && info.closePrice) {
+            // 쉼표 제거 후 파싱 (예: "1,423.50" → 1423.50)
+            const parseRate = (str) => parseFloat(String(str).replace(/,/g, '')) || 0;
+            
             rates[pair] = {
-              rate: parseFloat(data.closePrice),
-              change: parseFloat(data.compareToPreviousClosePrice) || 0,
-              changePercent: parseFloat(data.fluctuationsRatio) || 0,
-              high: parseFloat(data.highPrice) || null,
-              low: parseFloat(data.lowPrice) || null,
+              rate: parseRate(info.closePrice),
+              change: parseRate(info.fluctuations),
+              changePercent: parseRate(info.fluctuationsRatio),
+              high: null,
+              low: null,
             };
           }
         }
