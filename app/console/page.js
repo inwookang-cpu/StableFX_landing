@@ -1047,7 +1047,7 @@ function CurvesTab({ onCurveDataChange }) {
       // 1. Supabase에서 먼저 조회 (GitHub Actions가 15분마다 업데이트)
       const today = new Date().toISOString().split('T')[0];
       const supabaseResponse = await fetch(
-        `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&source=eq.naver&reference_date=eq.${today}&select=*&order=fetched_at.desc&limit=1`,
+        `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&reference_date=eq.${today}&select=*&order=fetched_at.desc&limit=20`,
         {
           headers: {
             'apikey': SUPABASE_ANON_KEY,
@@ -1060,25 +1060,25 @@ function CurvesTab({ onCurveDataChange }) {
         const supabaseData = await supabaseResponse.json();
         
         if (supabaseData && supabaseData.length > 0) {
-          const record = supabaseData[0];
-          const fetchedAt = new Date(record.fetched_at);
+          const latestRecord = supabaseData[0];
+          const fetchedAt = new Date(latestRecord.fetched_at);
           const ageMinutes = (now - fetchedAt.getTime()) / (1000 * 60);
           
-          // 15분 이내 데이터면 사용
+          // 20분 이내 데이터면 사용
           if (ageMinutes < 20) {
-            const rates = {
-              USDKRW: parseFloat(record.rate),
-              change: parseFloat(record.change) || 0,
-              changePercent: parseFloat(record.change_percent) || 0,
-              source: 'supabase'
-            };
+            const rates = {};
+            supabaseData.forEach(record => {
+              if (!rates[record.currency_pair]) {
+                rates[record.currency_pair] = parseFloat(record.rate);
+              }
+            });
             
             naverRateCache.data = rates;
             naverRateCache.lastFetch = now;
             
             setNaverRates(rates);
             setNaverLastUpdate(fetchedAt);
-            console.log('✅ Spot rate from Supabase:', rates.USDKRW, `(${Math.round(ageMinutes)}분 전)`);
+            console.log('✅ Spot rates from Supabase:', rates, `(${Math.round(ageMinutes)}분 전)`);
             
             return rates;
           }
@@ -1096,7 +1096,12 @@ function CurvesTab({ onCurveDataChange }) {
       const result = await response.json();
       
       if (result.success && result.rates) {
-        const rates = result.rates;
+        // API 응답 변환 (객체 → 숫자)
+        const rates = {};
+        Object.keys(result.rates).forEach(pair => {
+          const val = result.rates[pair];
+          rates[pair] = typeof val === 'object' ? val.rate : val;
+        });
         
         // 캐시 업데이트
         naverRateCache.data = rates;
@@ -1104,6 +1109,7 @@ function CurvesTab({ onCurveDataChange }) {
         
         setNaverRates(rates);
         setNaverLastUpdate(new Date(now));
+        console.log('✅ Spot rates from API:', rates);
         
         return rates;
       } else {
@@ -1128,7 +1134,11 @@ function CurvesTab({ onCurveDataChange }) {
       // spotRates 업데이트
       Object.keys(newData.spotRates).forEach(pair => {
         if (rates[pair] !== undefined) {
-          newData.spotRates[pair] = rates[pair];
+          // 객체면 rate 추출, 숫자면 그대로 사용
+          const rateValue = typeof rates[pair] === 'object' ? rates[pair].rate : rates[pair];
+          if (rateValue) {
+            newData.spotRates[pair] = rateValue;
+          }
         }
       });
       
