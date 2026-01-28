@@ -5,6 +5,7 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
+    // 기본 KRW 페어만 fetch (cross rate는 계산)
     const pairs = [
       { code: 'FX_USDKRW', pair: 'USDKRW' },
       { code: 'FX_JPYKRW', pair: 'JPYKRW' },
@@ -31,7 +32,13 @@ export async function GET() {
         if (response.ok) {
           const data = await response.json();
           if (data && data.closePrice) {
-            rates[pair] = parseFloat(data.closePrice);
+            rates[pair] = {
+              rate: parseFloat(data.closePrice),
+              change: parseFloat(data.compareToPreviousClosePrice) || 0,
+              changePercent: parseFloat(data.fluctuationsRatio) || 0,
+              high: parseFloat(data.highPrice) || null,
+              low: parseFloat(data.lowPrice) || null,
+            };
           }
         }
       } catch (err) {
@@ -39,27 +46,36 @@ export async function GET() {
       }
     }
     
-    // 크로스 환율 계산
-    if (rates.USDKRW && rates.EURKRW) {
-      rates['EURUSD'] = rates.EURKRW / rates.USDKRW;
+    // 크로스 환율 계산 (직접 fetch 하지 않고 계산)
+    const usd = rates.USDKRW?.rate;
+    const eur = rates.EURKRW?.rate;
+    const gbp = rates.GBPKRW?.rate;
+    const jpy = rates.JPYKRW?.rate;  // 100엔당
+    const cny = rates.CNYKRW?.rate;
+    const hkd = rates.HKDKRW?.rate;
+    const chf = rates.CHFKRW?.rate;
+    const aud = rates.AUDKRW?.rate;
+    
+    if (usd && eur) {
+      rates['EURUSD'] = { rate: eur / usd, change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.GBPKRW) {
-      rates['GBPUSD'] = rates.GBPKRW / rates.USDKRW;
+    if (usd && gbp) {
+      rates['GBPUSD'] = { rate: gbp / usd, change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.JPYKRW) {
-      rates['USDJPY'] = rates.USDKRW / (rates.JPYKRW / 100);
+    if (usd && jpy) {
+      rates['USDJPY'] = { rate: usd / (jpy / 100), change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.CNYKRW) {
-      rates['USDCNH'] = rates.USDKRW / rates.CNYKRW;
+    if (usd && cny) {
+      rates['USDCNH'] = { rate: usd / cny, change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.HKDKRW) {
-      rates['USDHKD'] = rates.USDKRW / rates.HKDKRW;
+    if (usd && hkd) {
+      rates['USDHKD'] = { rate: usd / hkd, change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.CHFKRW) {
-      rates['USDCHF'] = rates.USDKRW / rates.CHFKRW;
+    if (usd && chf) {
+      rates['USDCHF'] = { rate: usd / chf, change: 0, changePercent: 0 };
     }
-    if (rates.USDKRW && rates.AUDKRW) {
-      rates['AUDUSD'] = rates.AUDKRW / rates.USDKRW;
+    if (usd && aud) {
+      rates['AUDUSD'] = { rate: aud / usd, change: 0, changePercent: 0 };
     }
     
     return Response.json({ 

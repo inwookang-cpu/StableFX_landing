@@ -19,32 +19,32 @@ export default function FXInfoPage() {
   // EURKRW, JPYKRW Forward는 Cross rate로 계산됨
   const [fxData, setFxData] = useState({
     USDKRW: {
-      name: '미국 달러', code: 'USD/KRW', rate: 1443.10, change: -5.80, changePercent: -0.40,
+      name: '미국 달러', code: 'USDKRW', rate: 1443.10, change: -5.80, changePercent: -0.40,
       dayLow: 1440.50, dayHigh: 1448.20, yearLow: 1305.80, yearHigh: 1478.50,
       open: 1448.90, prevClose: 1448.90,
       forward1M: -1.60, forward3M: -4.80, forward6M: -8.50, forward1Y: -15.20,
     },
     USDJPY: {
-      name: '달러/엔', code: 'USD/JPY', rate: 156.50, change: -0.30, changePercent: -0.19,
+      name: '달러엔', code: 'USDJPY', rate: 156.50, change: -0.30, changePercent: -0.19,
       dayLow: 156.20, dayHigh: 157.10, yearLow: 140.00, yearHigh: 162.00,
       open: 156.80, prevClose: 156.80,
       forward1M: -0.55, forward3M: -1.65, forward6M: -3.10, forward1Y: -5.80,
     },
     EURUSD: {
-      name: '유로/달러', code: 'EUR/USD', rate: 1.0850, change: 0.0012, changePercent: 0.11,
+      name: '유로달러', code: 'EURUSD', rate: 1.0850, change: 0.0012, changePercent: 0.11,
       dayLow: 1.0835, dayHigh: 1.0875, yearLow: 1.0200, yearHigh: 1.1200,
       open: 1.0838, prevClose: 1.0838,
       forward1M: 0.00135, forward3M: 0.00425, forward6M: 0.00860, forward1Y: 0.01720,
     },
     JPYKRW: {
-      name: '일본 엔 (100엔)', code: 'JPY/KRW', rate: 922.11, change: -0.17, changePercent: -0.02,
+      name: '일본 엔 (100엔)', code: 'JPYKRW', rate: 922.11, change: -0.17, changePercent: -0.02,
       dayLow: 920.50, dayHigh: 925.20, yearLow: 880.00, yearHigh: 1020.00,
       open: 922.28, prevClose: 922.28,
       // Cross 계산: JPY DF (from USDJPY) / KRW DF (from USDKRW)
       forward1M: 2.23, forward3M: 6.73, forward6M: 13.09, forward1Y: 25.40,
     },
     EURKRW: {
-      name: '유럽 유로', code: 'EUR/KRW', rate: 1565.76, change: -4.50, changePercent: -0.29,
+      name: '유럽 유로', code: 'EURKRW', rate: 1565.76, change: -4.50, changePercent: -0.29,
       dayLow: 1562.00, dayHigh: 1572.50, yearLow: 1420.00, yearHigh: 1680.00,
       open: 1570.26, prevClose: 1570.26,
       // Cross 계산: EUR DF (from EURUSD) / KRW DF (from USDKRW)
@@ -53,11 +53,39 @@ export default function FXInfoPage() {
     },
   });
 
-  // Supabase에서 실시간 환율 가져오기
+  // 실시간 환율 가져오기 (Naver API 프록시)
   const fetchSpotRates = async () => {
     try {
-      const response = await fetch(
-        `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc`,
+      // 1차: Naver API
+      const response = await fetch('/api/naver-rates');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.rates) {
+          setFxData(prev => {
+            const updated = { ...prev };
+            Object.keys(data.rates).forEach(pair => {
+              if (updated[pair]) {
+                const r = data.rates[pair];
+                updated[pair] = {
+                  ...updated[pair],
+                  rate: r.rate,
+                  change: r.change || 0,
+                  changePercent: r.changePercent || 0,
+                  dayHigh: r.high || updated[pair].dayHigh,
+                  dayLow: r.low || updated[pair].dayLow,
+                };
+              }
+            });
+            return updated;
+          });
+          console.log('✅ Naver rates loaded');
+          return;
+        }
+      }
+      
+      // 2차: Supabase fallback
+      const sbResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc&limit=20`,
         {
           headers: {
             'apikey': SUPABASE_ANON_KEY,
@@ -66,10 +94,25 @@ export default function FXInfoPage() {
         }
       );
       
-      if (response.ok) {
-        const data = await response.json();
-        // TODO: fxData 업데이트
-        console.log('Spot rates:', data);
+      if (sbResponse.ok) {
+        const sbData = await sbResponse.json();
+        if (sbData.length > 0) {
+          setFxData(prev => {
+            const updated = { ...prev };
+            sbData.forEach(row => {
+              if (updated[row.currency_pair]) {
+                updated[row.currency_pair] = {
+                  ...updated[row.currency_pair],
+                  rate: row.rate,
+                  change: row.change || 0,
+                  changePercent: row.change_percent || 0,
+                };
+              }
+            });
+            return updated;
+          });
+          console.log('✅ Supabase rates loaded');
+        }
       }
     } catch (error) {
       console.error('Failed to fetch spot rates:', error);
@@ -139,7 +182,7 @@ export default function FXInfoPage() {
                 selectedPair === pair ? 'bg-white text-black font-bold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
               }`}
             >
-              {pair.includes('KRW') ? pair.replace('KRW', '/KRW') : pair.replace('USD', '/USD').replace('EUR/', 'EUR/')}
+              {pair}
             </button>
           ))}
         </div>

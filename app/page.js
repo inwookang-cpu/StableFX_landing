@@ -166,7 +166,9 @@ export default function PublicLanding() {
   const [curveData, setCurveData] = useState(null);
   const [curveLoading, setCurveLoading] = useState(false);
   const [interpDate, setInterpDate] = useState('');
-  const [spotRate, setSpotRate] = useState(null); // 네이버 실시간 환율
+  const [spotRate, setSpotRate] = useState(null); // 네이버 실시간 USDKRW
+  const [eurRate, setEurRate] = useState(null);   // EURKRW
+  const [jpyRate, setJpyRate] = useState(null);   // JPYKRW (100엔당)
   const [spreadSettings, setSpreadSettings] = useState({
     mode: 'byTenor',  // Tier4: 테너별 차등 스프레드
     uniformBp: 20,    // Tier4 기본: 20bp
@@ -332,8 +334,10 @@ export default function PublicLanding() {
     trackUsage('swap_points_load', { action: 'refresh' });
     
     try {
-      // 1. 네이버 스팟 환율 가져오기
+      // 1. 네이버 스팟 환율 가져오기 (USD, EUR, JPY)
       let spotRateValue = null;
+      let eurRateValue = null;
+      let jpyRateValue = null;
       
       // 1-1. 네이버 API 시도
       try {
@@ -342,7 +346,15 @@ export default function PublicLanding() {
           const naverData = await naverRes.json();
           if (naverData.rates?.USDKRW?.rate) {
             spotRateValue = naverData.rates.USDKRW.rate;
-            console.log('✅ Naver spot rate:', spotRateValue);
+            console.log('✅ Naver USDKRW:', spotRateValue);
+          }
+          if (naverData.rates?.EURKRW?.rate) {
+            eurRateValue = naverData.rates.EURKRW.rate;
+            console.log('✅ Naver EURKRW:', eurRateValue);
+          }
+          if (naverData.rates?.JPYKRW?.rate) {
+            jpyRateValue = naverData.rates.JPYKRW.rate;
+            console.log('✅ Naver JPYKRW:', jpyRateValue);
           }
         }
       } catch (e) {
@@ -353,15 +365,17 @@ export default function PublicLanding() {
       if (!spotRateValue) {
         try {
           const sbRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/spot_rates?currency_pair=eq.USDKRW&order=fetched_at.desc&limit=1`,
+            `${SUPABASE_URL}/rest/v1/spot_rates?order=fetched_at.desc&limit=10`,
             { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
           );
           if (sbRes.ok) {
             const sbData = await sbRes.json();
-            if (sbData.length > 0 && sbData[0].rate) {
-              spotRateValue = sbData[0].rate;
-              console.log('✅ Supabase spot rate:', spotRateValue);
-            }
+            sbData.forEach(row => {
+              if (row.currency_pair === 'USDKRW' && !spotRateValue) spotRateValue = row.rate;
+              if (row.currency_pair === 'EURKRW' && !eurRateValue) eurRateValue = row.rate;
+              if (row.currency_pair === 'JPYKRW' && !jpyRateValue) jpyRateValue = row.rate;
+            });
+            console.log('✅ Supabase spot rates loaded');
           }
         } catch (e2) {
           console.warn('Supabase spot rate failed:', e2);
@@ -369,15 +383,26 @@ export default function PublicLanding() {
       }
       
       // 1-3. 최종 fallback - 현재 시장 근사값
-      if (!spotRateValue) {
-        spotRateValue = 1443.00;
-        console.log('⚠️ Using fallback spot rate:', spotRateValue);
-      }
+      if (!spotRateValue) spotRateValue = 1443.00;
+      if (!eurRateValue) eurRateValue = 1565.00;
+      if (!jpyRateValue) jpyRateValue = 922.00;
       
       setSpotRate(spotRateValue);
+      setEurRate(eurRateValue);
+      setJpyRate(jpyRateValue);
 
       // 2. IPS 스왑포인트 가져오기
       let swapPointsData = null;
+      
+      // Spot date 계산 (T+2) - 공통으로 사용
+      const today = new Date();
+      const spotDate = new Date(today);
+      spotDate.setDate(spotDate.getDate() + 2);
+      while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
+        spotDate.setDate(spotDate.getDate() + 1);
+      }
+      const spotDateStr = spotDate.toISOString().split('T')[0];
+      
       try {
         const ipsRes = await fetch('/api/ips-swap');
         if (ipsRes.ok) {
@@ -407,23 +432,24 @@ export default function PublicLanding() {
                 const ask = parseFloat(row.b_ask) || 0;
                 const mid = (bid + ask) / 2;
                 
+                // Maturity 계산 (Spot Date + days)
+                const maturityDate = new Date(spotDate);
+                maturityDate.setDate(maturityDate.getDate() + (tm.days > 0 ? tm.days : 0));
+                // 주말 건너뛰기
+                while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
+                  maturityDate.setDate(maturityDate.getDate() + 1);
+                }
+                
                 fxSwapPoints.push({
                   tenor: tm.tenor,
                   days: tm.days > 0 ? tm.days : 1,
+                  maturity: maturityDate.toISOString().split('T')[0],
                   points: mid / 100, // 전단위 → 원단위
                   bid: bid / 100,
                   ask: ask / 100,
                 });
               }
             });
-
-            // Spot date 계산 (T+2)
-            const today = new Date();
-            const spotDate = new Date(today);
-            spotDate.setDate(spotDate.getDate() + 2);
-            while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
-              spotDate.setDate(spotDate.getDate() + 1);
-            }
 
             swapPointsData = {
               metadata: {
@@ -432,7 +458,7 @@ export default function PublicLanding() {
               },
               curves: {
                 USDKRW: {
-                  USD: { spotDate: spotDate.toISOString().split('T')[0] },
+                  USD: { spotDate: spotDateStr },
                   fxSwapPoints: fxSwapPoints,
                 }
               },
@@ -451,26 +477,29 @@ export default function PublicLanding() {
       if (!swapPointsData) {
         try {
           const sbRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/fx_swap_points?order=tenor.asc`,
+            `${SUPABASE_URL}/rest/v1/fx_swap_points?order=days.asc`,
             { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
           );
           if (sbRes.ok) {
             const sbData = await sbRes.json();
             if (sbData.length > 0) {
-              const fxSwapPoints = sbData.map(row => ({
-                tenor: row.tenor,
-                days: row.days || 30,
-                points: row.mid_points,
-                bid: row.bid_points,
-                ask: row.ask_points,
-              }));
-              
-              const today = new Date();
-              const spotDate = new Date(today);
-              spotDate.setDate(spotDate.getDate() + 2);
-              while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
-                spotDate.setDate(spotDate.getDate() + 1);
-              }
+              const fxSwapPoints = sbData.map(row => {
+                // Maturity 계산
+                const maturityDate = new Date(spotDate);
+                maturityDate.setDate(maturityDate.getDate() + (row.days > 0 ? row.days : 0));
+                while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
+                  maturityDate.setDate(maturityDate.getDate() + 1);
+                }
+                
+                return {
+                  tenor: row.tenor,
+                  days: row.days || 30,
+                  maturity: maturityDate.toISOString().split('T')[0],
+                  points: row.mid_points,
+                  bid: row.bid_points,
+                  ask: row.ask_points,
+                };
+              });
 
               swapPointsData = {
                 metadata: {
@@ -479,7 +508,7 @@ export default function PublicLanding() {
                 },
                 curves: {
                   USDKRW: {
-                    USD: { spotDate: spotDate.toISOString().split('T')[0] },
+                    USD: { spotDate: spotDateStr },
                     fxSwapPoints: fxSwapPoints,
                   }
                 },
@@ -495,26 +524,38 @@ export default function PublicLanding() {
         }
       }
 
-      // 4. 최후의 fallback - 정적 JSON (스팟환율은 무조건 현재값으로 덮어쓰기)
+      // 4. 최후의 fallback - 정적 JSON (최신 파일)
       if (!swapPointsData) {
-        const res = await fetch('/config/curves/20200302_IW.json');
+        const res = await fetch('/config/curves/20260127_IW.json');
         if (res.ok) {
           swapPointsData = await res.json();
           // 반드시 현재 스팟환율로 덮어쓰기
           swapPointsData.spotRates = { USDKRW: spotRateValue };
+          // Maturity 날짜 재계산
+          if (swapPointsData.curves?.USDKRW?.fxSwapPoints) {
+            swapPointsData.curves.USDKRW.fxSwapPoints = swapPointsData.curves.USDKRW.fxSwapPoints.map(p => {
+              const maturityDate = new Date(spotDate);
+              maturityDate.setDate(maturityDate.getDate() + (p.days > 0 ? p.days : 0));
+              while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
+                maturityDate.setDate(maturityDate.getDate() + 1);
+              }
+              return { ...p, maturity: maturityDate.toISOString().split('T')[0] };
+            });
+          }
+          swapPointsData.curves.USDKRW.USD.spotDate = spotDateStr;
           swapPointsData.metadata = {
-            ...swapPointsData.metadata,
-            source: swapPointsData.metadata?.source + ' (스왑포인트만 참고용)',
+            referenceDate: today.toISOString().split('T')[0],
+            source: 'JSON (fallback)',
           };
-          console.log('⚠️ Using JSON fallback with current spot rate');
+          console.log('⚠️ Using JSON fallback with current dates');
         }
       }
 
       if (swapPointsData) {
         setCurveData(swapPointsData);
-        const spotDateStr = swapPointsData.curves?.USDKRW?.USD?.spotDate;
-        if (spotDateStr) {
-          const d = new Date(spotDateStr);
+        const spotDateStrFinal = swapPointsData.curves?.USDKRW?.USD?.spotDate;
+        if (spotDateStrFinal) {
+          const d = new Date(spotDateStrFinal);
           d.setMonth(d.getMonth() + 1);
           setInterpDate(d.toISOString().split('T')[0]);
         }
@@ -837,13 +878,8 @@ export default function PublicLanding() {
               <div>
                 <h2 className="text-xl md:text-2xl font-semibold text-kustody-text">📊 스왑포인트 조회</h2>
                 <p className="text-kustody-muted text-xs md:text-sm mt-1">
-                  기준일: {curveData?.metadata?.referenceDate || new Date().toISOString().split('T')[0]} | Spot: <span className="text-kustody-accent font-mono">{formatNumber(spot, 2)}</span>
+                  기준일: {curveData?.metadata?.referenceDate || new Date().toISOString().split('T')[0]} | 출처: {curveData?.metadata?.source || '로딩중...'}
                 </p>
-                {curveData?.metadata?.source && (
-                  <p className="text-kustody-muted text-xs mt-0.5">
-                    출처: {curveData.metadata.source}
-                  </p>
-                )}
               </div>
               <button
                 onClick={loadSwapPoints}
@@ -852,6 +888,31 @@ export default function PublicLanding() {
               >
                 {curveLoading ? '로딩...' : '🔄 새로고침'}
               </button>
+            </div>
+
+            {/* 실시간 환율 카드 */}
+            <div className="mb-6 grid grid-cols-3 gap-3">
+              <div className="bg-gradient-to-br from-blue-600/20 to-blue-800/10 border border-blue-500/30 rounded-xl p-4 text-center">
+                <div className="text-xs text-blue-300 mb-1">🇺🇸 USD/KRW</div>
+                <div className="text-xl md:text-2xl font-bold font-mono text-blue-400">
+                  {spotRate ? formatNumber(spotRate, 2) : '-'}
+                </div>
+                <div className="text-[10px] text-kustody-muted mt-1">달러/원</div>
+              </div>
+              <div className="bg-gradient-to-br from-purple-600/20 to-purple-800/10 border border-purple-500/30 rounded-xl p-4 text-center">
+                <div className="text-xs text-purple-300 mb-1">🇪🇺 EUR/KRW</div>
+                <div className="text-xl md:text-2xl font-bold font-mono text-purple-400">
+                  {eurRate ? formatNumber(eurRate, 2) : '-'}
+                </div>
+                <div className="text-[10px] text-kustody-muted mt-1">유로/원</div>
+              </div>
+              <div className="bg-gradient-to-br from-red-600/20 to-red-800/10 border border-red-500/30 rounded-xl p-4 text-center">
+                <div className="text-xs text-red-300 mb-1">🇯🇵 JPY/KRW</div>
+                <div className="text-xl md:text-2xl font-bold font-mono text-red-400">
+                  {jpyRate ? formatNumber(jpyRate, 2) : '-'}
+                </div>
+                <div className="text-[10px] text-kustody-muted mt-1">100엔/원</div>
+              </div>
             </div>
             
             {curveLoading ? (
