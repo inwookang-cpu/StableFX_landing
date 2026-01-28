@@ -6,13 +6,13 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    const response = await fetch('https://www.ips-corp.co.kr/ajax/site/market/broker_data.php', {
+    const response = await fetch('https://www.ipscorp.co.kr/ajax/site/market/broker_data.php', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json',
-        'Referer': 'https://www.ips-corp.co.kr/',
+        'Referer': 'https://www.ipscorp.co.kr/',
       },
       body: 'market_gb=FX_SWAP',
       cache: 'no-store',
