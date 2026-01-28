@@ -408,53 +408,38 @@ export default function PublicLanding() {
         if (ipsRes.ok) {
           const ipsData = await ipsRes.json();
           if (ipsData.success && ipsData.data?.broker?.length > 0) {
-            // IPS 데이터 파싱
+            // IPS 데이터 파싱 (API가 이미 tenor, days 포함)
             const brokerData = ipsData.data.broker;
-            const tenorMap = [
-              { tenor: 'O/N', key: 'ON', days: -1 },
-              { tenor: 'T/N', key: 'TN', days: 0 },
-              { tenor: '1W', key: '1W', days: 7 },
-              { tenor: '2W', key: '2W', days: 14 },
-              { tenor: '1M', key: '1M', days: 30 },
-              { tenor: '2M', key: '2M', days: 60 },
-              { tenor: '3M', key: '3M', days: 90 },
-              { tenor: '6M', key: '6M', days: 180 },
-              { tenor: '9M', key: '9M', days: 270 },
-              { tenor: '1Y', key: '1Y', days: 365 },
-            ];
-
+            
             const fxSwapPoints = [];
-            tenorMap.forEach((tm, idx) => {
-              if (brokerData[idx]) {
-                const row = brokerData[idx];
-                // mid 값 계산 (bid + ask) / 2
-                const bid = parseFloat(row.b_bid) || 0;
-                const ask = parseFloat(row.b_ask) || 0;
-                const mid = (bid + ask) / 2;
-                
-                // Maturity 계산 (Spot Date + days)
-                const maturityDate = new Date(spotDate);
-                maturityDate.setDate(maturityDate.getDate() + (tm.days > 0 ? tm.days : 0));
-                // 주말 건너뛰기
-                while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
-                  maturityDate.setDate(maturityDate.getDate() + 1);
-                }
-                
-                fxSwapPoints.push({
-                  tenor: tm.tenor,
-                  days: tm.days > 0 ? tm.days : 1,
-                  maturity: maturityDate.toISOString().split('T')[0],
-                  points: mid / 100, // 전단위 → 원단위
-                  bid: bid / 100,
-                  ask: ask / 100,
-                });
+            brokerData.forEach(row => {
+              const bid = parseFloat(row.b_bid) || 0;
+              const ask = parseFloat(row.b_ask) || 0;
+              const mid = parseFloat(row.b_mid) || ((bid + ask) / 2);
+              const days = row.days || 30;
+              
+              // Maturity 계산 (Spot Date + days)
+              const maturityDate = new Date(spotDate);
+              maturityDate.setDate(maturityDate.getDate() + days);
+              // 주말 건너뛰기
+              while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
+                maturityDate.setDate(maturityDate.getDate() + 1);
               }
+              
+              fxSwapPoints.push({
+                tenor: row.tenor,
+                days: days,
+                maturity: maturityDate.toISOString().split('T')[0],
+                points: mid / 100, // 전단위 → 원단위
+                bid: bid / 100,
+                ask: ask / 100,
+              });
             });
 
             swapPointsData = {
               metadata: {
-                referenceDate: today.toISOString().split('T')[0],
-                source: 'IPS Corp (실시간)',
+                referenceDate: ipsData.data.referenceDate || today.toISOString().split('T')[0],
+                source: ipsData.data.source || 'IPS Corp (실시간)',
               },
               curves: {
                 USDKRW: {
@@ -466,7 +451,7 @@ export default function PublicLanding() {
                 USDKRW: spotRateValue,
               }
             };
-            console.log('✅ IPS swap points loaded');
+            console.log('✅ IPS swap points loaded:', fxSwapPoints.length, 'tenors');
           }
         }
       } catch (e) {
