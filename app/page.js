@@ -334,58 +334,62 @@ export default function PublicLanding() {
     trackUsage('swap_points_load', { action: 'refresh' });
     
     try {
-      // 1. 네이버 스팟 환율 가져오기 (USD, EUR, JPY)
+      // 1. 스팟 환율 가져오기 (Supabase 우선 → API fallback)
       let spotRateValue = null;
       let eurRateValue = null;
       let jpyRateValue = null;
       
-      // 1-1. 네이버 API 시도
+      // 1-1. Supabase에서 먼저 조회 (30분마다 업데이트됨)
       try {
-        const naverRes = await fetch('/api/naver-rates');
-        if (naverRes.ok) {
-          const naverData = await naverRes.json();
-          if (naverData.rates?.USDKRW?.rate) {
-            spotRateValue = naverData.rates.USDKRW.rate;
-            console.log('✅ Naver USDKRW:', spotRateValue);
-          }
-          if (naverData.rates?.EURKRW?.rate) {
-            eurRateValue = naverData.rates.EURKRW.rate;
-            console.log('✅ Naver EURKRW:', eurRateValue);
-          }
-          if (naverData.rates?.JPYKRW?.rate) {
-            jpyRateValue = naverData.rates.JPYKRW.rate;
-            console.log('✅ Naver JPYKRW:', jpyRateValue);
+        const sbRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc&limit=20`,
+          { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+        );
+        if (sbRes.ok) {
+          const sbData = await sbRes.json();
+          if (sbData.length > 0) {
+            const now = Date.now();
+            const fetchedAt = new Date(sbData[0].fetched_at);
+            const ageMinutes = (now - fetchedAt.getTime()) / (1000 * 60);
+            
+            // 30분 이내 데이터면 사용
+            if (ageMinutes < 30) {
+              sbData.forEach(row => {
+                if (row.currency_pair === 'USDKRW' && !spotRateValue) spotRateValue = row.rate;
+                if (row.currency_pair === 'EURKRW' && !eurRateValue) eurRateValue = row.rate;
+                if (row.currency_pair === 'JPYKRW' && !jpyRateValue) jpyRateValue = row.rate;
+              });
+              console.log(`✅ Supabase spot rates (${Math.round(ageMinutes)}분 전):`, spotRateValue);
+            }
           }
         }
       } catch (e) {
-        console.warn('Naver API failed:', e);
+        console.warn('Supabase spot rate failed:', e);
       }
       
-      // 1-2. 네이버 실패하면 Supabase spot_rates 시도
+      // 1-2. Supabase에 없으면 네이버 API 직접 호출
       if (!spotRateValue) {
         try {
-          const sbRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/spot_rates?order=fetched_at.desc&limit=10`,
-            { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
-          );
-          if (sbRes.ok) {
-            const sbData = await sbRes.json();
-            sbData.forEach(row => {
-              if (row.currency_pair === 'USDKRW' && !spotRateValue) spotRateValue = row.rate;
-              if (row.currency_pair === 'EURKRW' && !eurRateValue) eurRateValue = row.rate;
-              if (row.currency_pair === 'JPYKRW' && !jpyRateValue) jpyRateValue = row.rate;
-            });
-            console.log('✅ Supabase spot rates loaded');
+          console.log('📡 Supabase에 데이터 없음, API route 호출...');
+          const naverRes = await fetch('/api/naver-rates');
+          if (naverRes.ok) {
+            const naverData = await naverRes.json();
+            if (naverData.success && naverData.rates) {
+              if (naverData.rates.USDKRW?.rate) spotRateValue = naverData.rates.USDKRW.rate;
+              if (naverData.rates.EURKRW?.rate) eurRateValue = naverData.rates.EURKRW.rate;
+              if (naverData.rates.JPYKRW?.rate) jpyRateValue = naverData.rates.JPYKRW.rate;
+              console.log('✅ Naver API:', spotRateValue);
+            }
           }
-        } catch (e2) {
-          console.warn('Supabase spot rate failed:', e2);
+        } catch (e) {
+          console.warn('Naver API failed:', e);
         }
       }
       
-      // 1-3. 최종 fallback - 현재 시장 근사값
-      if (!spotRateValue) spotRateValue = 1443.00;
-      if (!eurRateValue) eurRateValue = 1565.00;
-      if (!jpyRateValue) jpyRateValue = 922.00;
+      // 1-3. 최종 fallback
+      if (!spotRateValue) spotRateValue = 1423.00;
+      if (!eurRateValue) eurRateValue = 1545.00;
+      if (!jpyRateValue) jpyRateValue = 917.00;
       
       setSpotRate(spotRateValue);
       setEurRate(eurRateValue);

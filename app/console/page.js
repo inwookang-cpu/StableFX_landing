@@ -1544,10 +1544,37 @@ function CurvesTab({ onCurveDataChange }) {
       
       if (!data) return;
       
-      // 2. Spread 설정 가져오기
+      // 2. Supabase에서 최신 환율 가져오기
+      try {
+        const spotRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc&limit=20`,
+          {
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            }
+          }
+        );
+        if (spotRes.ok) {
+          const spotData = await spotRes.json();
+          if (spotData && spotData.length > 0) {
+            // 최신 환율로 spotRates 업데이트
+            spotData.forEach(record => {
+              if (data.spotRates && data.spotRates[record.currency_pair] !== undefined) {
+                data.spotRates[record.currency_pair] = parseFloat(record.rate);
+              }
+            });
+            console.log('✅ Initial spot rates from Supabase:', data.spotRates);
+          }
+        }
+      } catch (e) {
+        console.warn('Supabase spot rate fetch failed:', e);
+      }
+      
+      // 3. Spread 설정 가져오기
       const spreads = await fetchSpreadSettings();
       
-      // 3. fxSwapPoints에 spread 적용
+      // 4. fxSwapPoints에 spread 적용
       if (data.curves?.USDKRW?.fxSwapPoints) {
         data.curves.USDKRW.fxSwapPoints = data.curves.USDKRW.fxSwapPoints.map(sp => {
           const spreadPips = spreads[sp.tenor] || 0;
