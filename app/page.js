@@ -334,12 +334,12 @@ export default function PublicLanding() {
     trackUsage('swap_points_load', { action: 'refresh' });
     
     try {
-      // 1. 스팟 환율 가져오기 (Supabase 우선 → API fallback)
+      // ========== 1. 스팟 환율 가져오기 ==========
       let spotRateValue = null;
       let eurRateValue = null;
       let jpyRateValue = null;
       
-      // 1-1. Supabase에서 먼저 조회 (30분마다 업데이트됨)
+      // 1-1. Supabase에서 먼저 조회
       try {
         const sbRes = await fetch(
           `${SUPABASE_URL}/rest/v1/spot_rates?source=eq.naver&order=fetched_at.desc&limit=20`,
@@ -352,7 +352,6 @@ export default function PublicLanding() {
             const fetchedAt = new Date(sbData[0].fetched_at);
             const ageMinutes = (now - fetchedAt.getTime()) / (1000 * 60);
             
-            // 30분 이내 데이터면 사용
             if (ageMinutes < 30) {
               sbData.forEach(row => {
                 if (row.currency_pair === 'USDKRW' && !spotRateValue) spotRateValue = row.rate;
@@ -395,160 +394,136 @@ export default function PublicLanding() {
       setEurRate(eurRateValue);
       setJpyRate(jpyRateValue);
 
-      // 2. IPS 스왑포인트 가져오기
-      let swapPointsData = null;
-      
-      // Spot date 계산 (T+2) - 공통으로 사용
+      // ========== 2. DateRuleCalculator로 날짜 계산 ==========
+      const calc = new DateRuleCalculator(DEFAULT_HOLIDAYS);
+      const calendars = ['KR', 'US'];
       const today = new Date();
-      const spotDate = new Date(today);
-      spotDate.setDate(spotDate.getDate() + 2);
-      while (spotDate.getDay() === 0 || spotDate.getDay() === 6) {
-        spotDate.setDate(spotDate.getDate() + 1);
+      const todayStr = formatDate(today);
+      const tradeDate = new Date(todayStr + 'T00:00:00');
+      
+      // Spot Date (T+2)
+      let spotDate = new Date(tradeDate);
+      for (let i = 0; i < 2; i++) {
+        spotDate = calc.nextBusinessDay(spotDate, true, calendars);
       }
-      const spotDateStr = spotDate.toISOString().split('T')[0];
+      const spotDateStr = formatDate(spotDate);
+      
+      // T+1 (O/N maturity, T/N start)
+      const tPlus1 = calc.nextBusinessDay(tradeDate, true, calendars);
+      const tPlus1Str = formatDate(tPlus1);
+      
+      console.log(`📅 Trade: ${todayStr}, T+1: ${tPlus1Str}, Spot: ${spotDateStr}`);
+
+      // ========== 3. Supabase에서 mid_points 가져오기 ==========
+      let midPointsMap = {};
+      let dataSource = 'fallback';
       
       try {
-        const ipsRes = await fetch('/api/ips-swap');
-        if (ipsRes.ok) {
-          const ipsData = await ipsRes.json();
-          if (ipsData.success && ipsData.data?.broker?.length > 0) {
-            // IPS 데이터 파싱 (API가 이미 tenor, days 포함)
-            const brokerData = ipsData.data.broker;
-            
-            const fxSwapPoints = [];
-            brokerData.forEach(row => {
-              const bid = parseFloat(row.b_bid) || 0;
-              const ask = parseFloat(row.b_ask) || 0;
-              const mid = parseFloat(row.b_mid) || ((bid + ask) / 2);
-              const days = row.days || 30;
-              
-              // Maturity 계산 (Spot Date + days)
-              const maturityDate = new Date(spotDate);
-              maturityDate.setDate(maturityDate.getDate() + days);
-              // 주말 건너뛰기
-              while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
-                maturityDate.setDate(maturityDate.getDate() + 1);
-              }
-              
-              fxSwapPoints.push({
-                tenor: row.tenor,
-                days: days,
-                maturity: maturityDate.toISOString().split('T')[0],
-                points: mid / 100, // 전단위 → 원단위
-                bid: bid / 100,
-                ask: ask / 100,
-              });
+        const sbRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/fx_swap_points?source=eq.IPS&order=reference_date.desc`,
+          { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+        );
+        if (sbRes.ok) {
+          const sbData = await sbRes.json();
+          if (sbData.length > 0) {
+            // 가장 최신 reference_date의 데이터만 사용
+            const latestDate = sbData[0].reference_date;
+            sbData.filter(r => r.reference_date === latestDate).forEach(row => {
+              midPointsMap[row.tenor] = row.mid_points;
             });
-
-            swapPointsData = {
-              metadata: {
-                referenceDate: ipsData.data.referenceDate || today.toISOString().split('T')[0],
-                source: ipsData.data.source || 'IPS Corp (실시간)',
-              },
-              curves: {
-                USDKRW: {
-                  USD: { spotDate: spotDateStr },
-                  fxSwapPoints: fxSwapPoints,
-                }
-              },
-              spotRates: {
-                USDKRW: spotRateValue,
-              }
-            };
-            console.log('✅ IPS swap points loaded:', fxSwapPoints.length, 'tenors');
+            dataSource = `Supabase (${latestDate})`;
+            console.log('✅ Supabase mid_points:', midPointsMap);
           }
         }
       } catch (e) {
-        console.warn('IPS swap points fetch failed:', e);
+        console.warn('Supabase fx_swap_points failed:', e);
       }
 
-      // 3. 데이터가 없으면 Supabase에서 가져오기
-      if (!swapPointsData) {
+      // fallback: JSON 파일
+      if (Object.keys(midPointsMap).length === 0) {
         try {
-          const sbRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/fx_swap_points?order=days.asc`,
-            { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
-          );
-          if (sbRes.ok) {
-            const sbData = await sbRes.json();
-            if (sbData.length > 0) {
-              const fxSwapPoints = sbData.map(row => {
-                // Maturity 계산
-                const maturityDate = new Date(spotDate);
-                maturityDate.setDate(maturityDate.getDate() + (row.days > 0 ? row.days : 0));
-                while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
-                  maturityDate.setDate(maturityDate.getDate() + 1);
-                }
-                
-                return {
-                  tenor: row.tenor,
-                  days: row.days || 30,
-                  maturity: maturityDate.toISOString().split('T')[0],
-                  points: row.mid_points,
-                  bid: row.bid_points,
-                  ask: row.ask_points,
-                };
+          const res = await fetch('/config/curves/20260127_IW.json');
+          if (res.ok) {
+            const jsonData = await res.json();
+            if (jsonData.curves?.USDKRW?.fxSwapPoints) {
+              jsonData.curves.USDKRW.fxSwapPoints.forEach(p => {
+                midPointsMap[p.tenor] = p.points;
               });
-
-              swapPointsData = {
-                metadata: {
-                  referenceDate: today.toISOString().split('T')[0],
-                  source: 'Supabase DB',
-                },
-                curves: {
-                  USDKRW: {
-                    USD: { spotDate: spotDateStr },
-                    fxSwapPoints: fxSwapPoints,
-                  }
-                },
-                spotRates: {
-                  USDKRW: spotRateValue,
-                }
-              };
-              console.log('✅ Supabase swap points loaded');
+              dataSource = 'JSON (fallback)';
             }
           }
         } catch (e) {
-          console.warn('Supabase swap points failed:', e);
+          console.warn('JSON fallback failed:', e);
         }
       }
 
-      // 4. 최후의 fallback - 정적 JSON (최신 파일)
-      if (!swapPointsData) {
-        const res = await fetch('/config/curves/20260127_IW.json');
-        if (res.ok) {
-          swapPointsData = await res.json();
-          // 반드시 현재 스팟환율로 덮어쓰기
-          swapPointsData.spotRates = { USDKRW: spotRateValue };
-          // Maturity 날짜 재계산
-          if (swapPointsData.curves?.USDKRW?.fxSwapPoints) {
-            swapPointsData.curves.USDKRW.fxSwapPoints = swapPointsData.curves.USDKRW.fxSwapPoints.map(p => {
-              const maturityDate = new Date(spotDate);
-              maturityDate.setDate(maturityDate.getDate() + (p.days > 0 ? p.days : 0));
-              while (maturityDate.getDay() === 0 || maturityDate.getDay() === 6) {
-                maturityDate.setDate(maturityDate.getDate() + 1);
-              }
-              return { ...p, maturity: maturityDate.toISOString().split('T')[0] };
-            });
+      // ========== 4. 각 Tenor별 날짜/days 계산 ==========
+      const tenorList = ['ON', 'TN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
+      const fxSwapPoints = [];
+      
+      for (const tenor of tenorList) {
+        const midPoints = midPointsMap[tenor];
+        if (midPoints === undefined) {
+          console.warn(`⚠️ No mid_points for ${tenor}`);
+          continue;
+        }
+        
+        let startDate, maturityDate, days;
+        
+        if (tenor === 'ON') {
+          // O/N: Trade Date → T+1
+          startDate = tradeDate;
+          maturityDate = tPlus1;
+          days = 1;
+        } else if (tenor === 'TN') {
+          // T/N: T+1 → Spot
+          startDate = tPlus1;
+          maturityDate = spotDate;
+          days = 1;
+        } else {
+          // 1W ~ 1Y: Spot → Maturity
+          startDate = spotDate;
+          maturityDate = calc.addTenor(tradeDate, tenor, 2, calendars, true);
+          days = Math.round((maturityDate - spotDate) / (1000 * 60 * 60 * 24));
+        }
+        
+        fxSwapPoints.push({
+          tenor: tenor,
+          startDate: formatDate(startDate),
+          maturity: formatDate(maturityDate),
+          days: days,
+          points: midPoints,
+          bid: null,  // spread는 클라이언트에서 계산
+          ask: null,
+        });
+      }
+      
+      console.log(`✅ Calculated ${fxSwapPoints.length} tenors from ${dataSource}`);
+
+      // ========== 5. curveData 구성 ==========
+      const swapPointsData = {
+        metadata: {
+          referenceDate: todayStr,
+          source: dataSource,
+        },
+        curves: {
+          USDKRW: {
+            USD: { spotDate: spotDateStr },
+            fxSwapPoints: fxSwapPoints,
           }
-          swapPointsData.curves.USDKRW.USD.spotDate = spotDateStr;
-          swapPointsData.metadata = {
-            referenceDate: today.toISOString().split('T')[0],
-            source: 'JSON (fallback)',
-          };
-          console.log('⚠️ Using JSON fallback with current dates');
+        },
+        spotRates: {
+          USDKRW: spotRateValue,
         }
-      }
+      };
 
-      if (swapPointsData) {
-        setCurveData(swapPointsData);
-        const spotDateStrFinal = swapPointsData.curves?.USDKRW?.USD?.spotDate;
-        if (spotDateStrFinal) {
-          const d = new Date(spotDateStrFinal);
-          d.setMonth(d.getMonth() + 1);
-          setInterpDate(d.toISOString().split('T')[0]);
-        }
-      }
+      setCurveData(swapPointsData);
+      
+      // 기본 보간 날짜 설정 (Spot + 1M)
+      const defaultInterpDate = new Date(spotDate);
+      defaultInterpDate.setMonth(defaultInterpDate.getMonth() + 1);
+      setInterpDate(formatDate(defaultInterpDate));
+      
     } catch (e) {
       console.error('Failed to load swap points:', e);
     }
@@ -955,8 +930,8 @@ export default function PublicLanding() {
                     </thead>
                     <tbody>
                       {curveData.curves?.USDKRW?.fxSwapPoints?.map((p, i) => {
-                        const displayDays = p.start && p.maturity 
-                          ? Math.round((new Date(p.maturity) - new Date(p.start)) / (1000 * 60 * 60 * 24))
+                        const displayDays = p.startDate && p.maturity 
+                          ? Math.round((new Date(p.maturity) - new Date(p.startDate)) / (1000 * 60 * 60 * 24))
                           : (p.days > 0 ? p.days : 1);
                         const midPips = p.points !== null ? Math.round(p.points * 100) : null;
                         const spDay = (displayDays > 0 && midPips !== null) ? (midPips / displayDays).toFixed(2) : '-';
